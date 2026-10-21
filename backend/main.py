@@ -23,6 +23,7 @@ from __future__ import annotations
 import contextvars
 import json as _json
 import os
+import re
 import socket
 import time
 from pathlib import Path as FilePath
@@ -35,6 +36,7 @@ from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 
 import mock_data
+import notes
 import scanner
 from douban_client import CONFIG_FILE, DoubanError, client, save_config
 
@@ -683,6 +685,13 @@ async def create_scan_job(body: ScanIn):
     """
     if not body.groups:
         return {"ok": False, "detail": "请提供至少一个小组 id（groups）"}
+    # 回帖（评论）接口需要登录态：没凭证时直接拦下，别让任务空跑一堆 403
+    if body.mode in ("comments", "both") and not (_c().token or _c().cookie):
+        return {"ok": False, "need_login": True,
+                "detail": "豆瓣的「回帖/评论」接口已改为必须登录才能查看"
+                          "（匿名会返回 403 need_permission）。"
+                          "请先点右上角「登录」粘贴你的豆瓣 Cookie 或 Bearer token，"
+                          "再启动回帖扫描。只扫发帖（posts）模式不受影响。"}
     try:
         job = await scanner.create_job(
             body.user_id, body.user_name or "", body.groups,
@@ -864,11 +873,16 @@ async def reverse_lookup_comments(
     topic_pages: int = Query(2, ge=1, le=5, description="每个小组扫描的话题页数（每页 50 条）"),
     comments_per_topic: int = Query(20, ge=5, le=50, description="每条话题最多扫多少条评论"),
 ):
-    """【反查他人回帖 · 公开接口】扫描指定小组近期话题的评论区，过滤出该用户的回帖
+    """【反查他人回帖】扫描指定小组近期话题的评论区，过滤出该用户的回帖
 
     与 posts-in-groups 的区别：
       * posts-in-groups → 找 TA 的发帖（话题首帖）
       * comments-in-groups → 找 TA 的回帖（评论）
+
+    ⚠️ 评论接口需要登录：豆瓣已把评论/回帖接口改成必须登录才能查看，
+       匿名请求会得到 403 need_permission。此时本接口返回
+       source=restricted + data.need_login=true，前端会提示先登录。
+       这不是「反爬/机器人」提示 —— 登录后再查即可正常。
 
     限制：覆盖范围 = 候选小组最近 N 个话题 × 每话题前 M 条评论。
     """
@@ -882,11 +896,16 @@ async def reverse_lookup_comments(
             user_id, group_ids, topic_pages, comments_per_topic,
         )
     except DoubanError as e:
+        if e.need_login:
+            return Resp(ok=True, source="restricted",
+                        data={"comments": [], "total": 0, "need_login": True},
+                        message=e.msg)
         raise _err(e)
     comments = result.get("comments", []) if isinstance(result, dict) else result
     payload = {
         "comments": comments,
         "total": len(comments),
+        "need_login": bool(result.get("need_login")) if isinstance(result, dict) else False,
         "scanned_groups": group_ids,
         "note": f"已扫描 {len(group_ids)} 个小组 × {topic_pages} 页话题 × 每条 {comments_per_topic} 条评论，"
                 f"命中的是 TA 在这批话题里的近期回帖（非全量历史）",
@@ -894,6 +913,9 @@ async def reverse_lookup_comments(
     if isinstance(result, dict) and result.get("warning"):
         payload["warning"] = result["warning"]
         payload["blocked_groups"] = result.get("blocked_groups", [])
+    if payload["need_login"]:
+        return Resp(ok=True, source="restricted", data=payload,
+                    message=result.get("reason") or "该查询需要登录豆瓣账号")
     return Resp(ok=True, source="douban", data=payload)
 
 
@@ -941,6 +963,147 @@ async def get_group_topics(group_id: str, start: int = 0, count: int = Query(20,
         "likes_count": x.get("likes_count", 0),
     } for x in t.get("topics", [])]
     return Resp(ok=True, source="douban", data={"topics": topics, "total": t.get("total")})
+
+
+# --------------------------------------------------------------------
+# 手动补充记录（notes）
+# --------------------------------------------------------------------
+def _note_scope() -> Optional[str]:
+    """当前请求对应的笔记分区。
+
+    共享 / 公网模式下，若访问者没带凭证，就无法区分"这是谁的笔记"，
+    返回 None → 前端改为只存在他自己的浏览器 localStorage 里。
+    """
+    if PUBLIC_MODE or CLOUD_MODE:
+        c = _c()
+        if not (c.token or c.cookie):
+            return None
+        # 共享部署：按访问者凭证指纹分区，各人的私人备注互不可见
+        return notes.scope_id(c.token, c.cookie)
+    # 本机个人使用：固定分区，换 token / 重新登录都不会丢
+    return "local"
+
+
+class NoteIn(BaseModel):
+    kind: str = "text"                    # url | image | text
+    url: Optional[str] = None
+    title: Optional[str] = None
+    text: Optional[str] = None
+    image: Optional[str] = None           # data:image/...;base64,...
+    tags: Optional[list[str] | str] = None
+    user_name: Optional[str] = None
+    topic_id: Optional[str] = None
+    group_id: Optional[str] = None
+    group_name: Optional[str] = None
+
+
+@app.get("/api/notes/{user_id}", response_model=Resp)
+async def get_notes(user_id: str = Path(...)):
+    """取某个 uid 的手动补充记录"""
+    sc = _note_scope()
+    if sc is None:
+        return Resp(ok=False, source="local_only", data={"items": [], "total": 0},
+                    message="共享模式下服务端不保存补充记录，请改用浏览器本地存储")
+    return Resp(ok=True, source="local", data=notes.list_notes(sc, user_id))
+
+
+@app.post("/api/notes/{user_id}", response_model=Resp)
+async def create_note(body: NoteIn, user_id: str = Path(...)):
+    """新增一条补充记录（同一个帖子网址会合并更新，不重复添加）"""
+    sc = _note_scope()
+    if sc is None:
+        return Resp(ok=False, source="local_only", data=None,
+                    message="共享模式下服务端不保存补充记录，请改用浏览器本地存储")
+    try:
+        data = notes.add_note(sc, user_id, body.model_dump(), body.user_name or "")
+    except Exception as e:  # noqa: BLE001
+        return Resp(ok=False, source="local", data=None, message=f"保存失败：{e}")
+    return Resp(ok=True, source="local", data=data,
+                message=f"已保存，该 uid 现有 {data.get('total', 0)} 条补充记录")
+
+
+@app.delete("/api/notes/{user_id}/{item_id}", response_model=Resp)
+async def remove_note(user_id: str = Path(...), item_id: str = Path(...)):
+    """删除一条补充记录"""
+    sc = _note_scope()
+    if sc is None:
+        return Resp(ok=False, source="local_only", data=None,
+                    message="共享模式下服务端不保存补充记录，请改用浏览器本地存储")
+    return Resp(ok=True, source="local", data=notes.delete_note(sc, user_id, item_id))
+
+
+@app.post("/api/notes/{user_id}/pin", response_model=Resp)
+async def pin_note(body: dict, user_id: str = Path(...)):
+    """置顶 / 取消置顶一条补充记录"""
+    sc = _note_scope()
+    if sc is None:
+        return Resp(ok=False, source="local_only", data=None,
+                    message="共享模式下服务端不保存补充记录，请改用浏览器本地存储")
+    item_id = str(body.get("item_id") or "")
+    return Resp(ok=True, source="local", data=notes.toggle_pin(sc, user_id, item_id))
+
+
+@app.get("/api/notes/export/all", response_model=Resp)
+async def export_notes():
+    """导出全部补充记录（备份 / 换设备用）"""
+    sc = _note_scope()
+    if sc is None:
+        return Resp(ok=False, source="local_only", data=None,
+                    message="共享模式下服务端不保存补充记录")
+    return Resp(ok=True, source="local", data=notes.export_all(sc))
+
+
+@app.post("/api/notes/import/all", response_model=Resp)
+async def import_notes(payload: dict):
+    """导入备份（覆盖当前分区）"""
+    sc = _note_scope()
+    if sc is None:
+        return Resp(ok=False, source="local_only", data=None,
+                    message="共享模式下服务端不保存补充记录")
+    try:
+        out = notes.import_all(sc, payload or {})
+    except ValueError as e:
+        return Resp(ok=False, source="local", data=None, message=str(e))
+    return Resp(ok=True, source="local", data=out, message="导入完成")
+
+
+# --------------------------------------------------------------------
+# 话题详情（供「粘贴帖子网址 → 自动带出标题」使用）
+# --------------------------------------------------------------------
+@app.get("/api/topic/{topic_id}", response_model=Resp)
+async def get_topic(topic_id: str = Path(...)):
+    """按话题 id 取详情（标题 / 摘要 / 所属小组 / 作者 / 时间）
+
+    用途：补充记录里粘贴帖子网址时自动带出标题，省得手打。
+    注意：豆瓣该接口同样需要登录态，未登录时返回 restricted。
+    """
+    tid = re.sub(r"\D", "", topic_id or "")
+    if not tid:
+        return Resp(ok=False, source="none", message="话题 id 无效")
+    try:
+        t = await _c().get_topic(tid)
+    except DoubanError as e:
+        if e.need_login:
+            return Resp(ok=True, source="restricted",
+                        data={"topic_id": tid, "need_login": True},
+                        message="话题详情需要登录态，可手动填写标题")
+        raise _err(e)
+    g = t.get("group") or {}
+    a = t.get("author") or {}
+    return Resp(ok=True, source="douban", data={
+        "topic_id": t.get("id") or tid,
+        "title": t.get("title") or "",
+        "abstract": t.get("abstract") or "",
+        "create_time": t.get("create_time") or "",
+        "group_id": g.get("id") or "",
+        "group_name": g.get("name") or "",
+        "author_id": a.get("id") or "",
+        "author_name": a.get("name") or "",
+        "comments_count": t.get("comments_count", 0),
+        "likes_count": t.get("likes_count", 0),
+        "url": t.get("sharing_url") or t.get("url")
+                 or f"https://www.douban.com/group/topic/{tid}/",
+    })
 
 
 if __name__ == "__main__":

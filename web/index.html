@@ -433,6 +433,69 @@
     font-size: 13px; cursor: pointer;
   }
   .load-more:active { opacity: .7; }
+
+  /* ---------- 手动补充记录 ---------- */
+  .note-toolbar { display: flex; gap: 8px; margin: 12px 16px 4px; }
+  .note-btn {
+    flex: 1; background: #fff; border: 1px dashed #b7e2c2; color: #2e963a;
+    border-radius: 12px; padding: 11px 0; font-size: 13px; cursor: pointer;
+    display: flex; align-items: center; justify-content: center; gap: 5px;
+  }
+  .note-btn:active { background: #f2fbf4; }
+  .note-btn.solid { background: #42bd56; color: #fff; border-style: solid; border-color: #42bd56; }
+  .note-sec-title { font-size: 14px; font-weight: 600; margin: 16px 16px 8px;
+    display: flex; align-items: center; gap: 6px; }
+  .note-sec-title .cnt { font-size: 11px; font-weight: 400; color: #999; }
+
+  .note-item { background: #fffdf5; border: 1px solid #f3e6c0; border-radius: 14px;
+    padding: 13px 14px; margin: 0 16px 10px; position: relative; }
+  .note-item.pinned { background: #fff8e1; border-color: #f0d48a; }
+  .note-head { display: flex; align-items: center; gap: 6px; margin-bottom: 7px;
+    flex-wrap: wrap; }
+  .note-badge { background: #f5c542; color: #4a3400; font-size: 10px; font-weight: 600;
+    border-radius: 5px; padding: 2px 6px; }
+  .note-badge.kind { background: #eef1f4; color: #667; font-weight: 500; }
+  .note-badge.pin { background: #ffe9a8; color: #8a5a00; }
+  .note-time { font-size: 11px; color: #b09a5f; margin-left: auto; }
+  .note-title { font-size: 14px; font-weight: 600; line-height: 1.5; color: #3a3220;
+    word-break: break-word; }
+  .note-text { margin-top: 6px; font-size: 13px; color: #5c5340; line-height: 1.65;
+    white-space: pre-wrap; word-break: break-word; }
+  .note-link { margin-top: 7px; font-size: 12px; color: #2e963a; word-break: break-all;
+    display: inline-block; }
+  .note-tags { margin-top: 8px; display: flex; flex-wrap: wrap; gap: 5px; }
+  .note-tag { background: #fff0c9; color: #8a6a12; font-size: 11px;
+    border-radius: 10px; padding: 2px 8px; }
+  .note-img { margin-top: 8px; max-width: 100%; border-radius: 10px;
+    display: block; border: 1px solid #eee; cursor: zoom-in; }
+  .note-acts { margin-top: 9px; display: flex; gap: 14px; font-size: 11px; color: #a89a6b; }
+  .note-acts span { cursor: pointer; }
+  .note-acts span:active { opacity: .6; }
+  .note-mode-tip { font-size: 11px; color: #999; margin: 6px 16px 0; line-height: 1.6; }
+
+  .note-tabs { display: flex; gap: 6px; margin: 10px 0 4px; }
+  .note-tab { flex: 1; text-align: center; font-size: 12px; padding: 8px 0;
+    background: #f1f3f5; border-radius: 8px; color: #555; cursor: pointer; }
+  .note-tab.active { background: #42bd56; color: #fff; }
+  .note-pane { display: none; }
+  .note-pane.active { display: block; }
+  .note-modal .modal-row { display: flex; gap: 6px; align-items: center; }
+  .note-modal input[type=text], .note-modal textarea {
+    width: 100%; box-sizing: border-box; border: 1px solid #d9d9d9;
+    border-radius: 8px; padding: 9px 10px; font-size: 13px;
+    font-family: inherit; margin-top: 6px; resize: vertical;
+  }
+  .note-modal input[type=text]:focus, .note-modal textarea:focus {
+    outline: none; border-color: #42bd56; }
+  .note-modal .mini-btn { width: auto; padding: 9px 14px; margin: 6px 0 0;
+    font-size: 12px; background: #f1f3f5; color: #444; }
+  .note-preview { margin-top: 8px; max-width: 100%; border-radius: 8px;
+    display: none; border: 1px solid #eee; }
+  .note-label { font-size: 12px; color: #666; margin-top: 10px; display: block; }
+  .img-viewer { position: fixed; inset: 0; background: rgba(0,0,0,.88);
+    display: none; align-items: center; justify-content: center; z-index: 300; }
+  .img-viewer.show { display: flex; }
+  .img-viewer img { max-width: 94%; max-height: 92%; border-radius: 8px; }
 </style>
 </head>
 <body>
@@ -572,6 +635,71 @@
 
       <button class="ghost" onclick="closeShareModal()">关闭</button>
     </div>
+  </div>
+
+  <!-- 补充记录弹窗 -->
+  <div class="modal-mask note-modal" id="noteModal"
+       onclick="if (event.target === this) closeNoteModal()">
+    <div class="modal">
+      <h3>➕ 补充 TA 的发言记录</h3>
+      <p class="m-tip">
+        豆瓣接口查不到的东西，可以自己补进来：<b>帖子网址</b>（自动带出标题）、
+        <b>截图</b>、或<b>手写关键词</b>。保存后会跟着这个 uid 走，
+        下次再查同一个 ID 会自动一起显示。
+      </p>
+      <div class="m-sub" id="noteForWhom" style="color:#2e963a"></div>
+
+      <div class="note-tabs">
+        <div class="note-tab active" id="ntab-url" onclick="switchNoteTab('url')">🔗 帖子网址</div>
+        <div class="note-tab" id="ntab-image" onclick="switchNoteTab('image')">🖼 截图</div>
+        <div class="note-tab" id="ntab-text" onclick="switchNoteTab('text')">✍️ 手写</div>
+      </div>
+
+      <!-- 网址 -->
+      <div class="note-pane active" id="npane-url">
+        <span class="note-label">粘贴豆瓣帖子网址（或整段分享文字，会自动抠出链接）</span>
+        <input type="text" id="noteUrl" spellcheck="false"
+               placeholder="https://www.douban.com/group/topic/123456789/">
+        <button class="mini-btn" onclick="autoFillFromUrl()">自动带出标题</button>
+        <div id="noteUrlMsg" style="font-size:12px;color:#888;margin-top:6px"></div>
+      </div>
+
+      <!-- 截图 -->
+      <div class="note-pane" id="npane-image">
+        <span class="note-label">选一张截图（自动压缩，画质够看就行）</span>
+        <input type="file" id="noteImageFile" accept="image/*"
+               style="margin-top:6px;font-size:12px" onchange="onNoteImage(event)">
+        <img class="note-preview" id="noteImagePreview" alt="">
+        <div id="noteImgMsg" style="font-size:12px;color:#888;margin-top:6px"></div>
+      </div>
+
+      <!-- 手写 -->
+      <div class="note-pane" id="npane-text">
+        <span class="note-label">关键词 / 备注（比如「收了定金不发货」）</span>
+        <textarea id="noteText" rows="4" spellcheck="false"
+                  placeholder="用一句话记下你掌握的信息，多个关键词用空格或逗号分开"></textarea>
+      </div>
+
+      <!-- 公共字段 -->
+      <span class="note-label">标题（可选，网址模式会自动填）</span>
+      <input type="text" id="noteTitle" placeholder="给这条补充记录起个名字">
+
+      <span class="note-label">正文 / 说明（可选）</span>
+      <textarea id="noteBody" rows="2" spellcheck="false"
+                placeholder="补充说明，比如当时的情境、你从哪看到的"></textarea>
+
+      <span class="note-label">标签（可选，逗号分隔，方便以后筛）</span>
+      <input type="text" id="noteTags" placeholder="例如：中介, 押金, 已拉黑">
+
+      <div class="m-status" id="noteSaveStatus"></div>
+      <button id="noteSaveBtn" onclick="saveNote()">保存这条补充记录</button>
+      <button class="ghost" onclick="closeNoteModal()">取消</button>
+    </div>
+  </div>
+
+  <!-- 图片查看 -->
+  <div class="img-viewer" id="imgViewer" onclick="closeImgViewer()">
+    <img id="imgViewerImg" alt="">
   </div>
 
   <!-- 顶部导航（非首页显示） -->
@@ -998,7 +1126,7 @@ function renderScanView() {
         <label>扫描内容</label>
         <select onchange="scanState.mode=this.value; updateScanEst()">
           <option value="posts" ${s.mode === 'posts' ? 'selected' : ''}>只扫发帖（最快最稳）</option>
-          <option value="comments" ${s.mode === 'comments' ? 'selected' : ''}>只扫回帖（易触发反爬）</option>
+          <option value="comments" ${s.mode === 'comments' ? 'selected' : ''}>只扫回帖（需先登录）</option>
           <option value="both" ${s.mode === 'both' ? 'selected' : ''}>发帖 + 回帖</option>
         </select>
       </div>
@@ -1026,7 +1154,11 @@ function updateScanEst() {
   $('scanEst').innerHTML = `已选 <b>${n}</b> 个小组 · 预计约 <b>${pages}</b> 次话题请求`
     + (cReqs ? ` + <b>${cReqs}</b> 次评论请求` : '')
     + ` · 预计耗时 <b>${secs < 60 ? secs + ' 秒' : Math.round(secs / 60) + ' 分钟'}</b>`
-    + (s.mode !== 'posts' ? '<br><span style="color:#c2410c">回帖模式可能因反爬大幅变慢（每次退避 30~180 秒）</span>' : '');
+    + (s.mode !== 'posts'
+        ? (loginState && loginState.token_valid
+            ? '<br><span style="color:#2e963a">回帖模式已登录，评论接口可正常读取</span>'
+            : '<br><span style="color:#c2410c">回帖模式必须先登录 —— 豆瓣评论接口已不对匿名开放</span>')
+        : '');
 }
 
 function useSelfForScan() {
@@ -1083,7 +1215,11 @@ async function startScan() {
       }),
     });
     const j = await r.json();
-    if (!j.ok) { alert(j.detail || '启动失败'); btn.disabled = false; btn.textContent = '启动全量扫描'; return; }
+    if (!j.ok) {
+      alert(j.detail || '启动失败');
+      if (j.need_login) openTokenModal();
+      btn.disabled = false; btn.textContent = '启动全量扫描'; return;
+    }
     scanState.expanded[j.job_id] = true;
     await loadJobs();
   } catch (e) {
@@ -1132,7 +1268,10 @@ function renderJobs(jobs) {
         ${p.oldest_topic_time ? '· 已翻到 ' + esc(p.oldest_topic_time) : ''}
         <br>当前：${esc(p.current_group_name || '—')}
         ${p.current_topic_title ? '· ' + esc(String(p.current_topic_title).slice(0, 18)) : ''}
-        ${p.comment_blocked ? `<br><span style="color:#c2410c">回帖被反爬拦截 ${p.comment_blocked} 条话题</span>` : ''}
+        ${p.comment_blocked ? `<br><span style="color:#c2410c">回帖被限流拦截 ${p.comment_blocked} 条话题</span>` : ''}
+        ${(j.blocked && j.blocked.__login__)
+          ? `<br><span style="color:#b45309">🔐 回帖扫描已中止：需重新登录豆瓣（${esc(String(j.blocked.__login__).slice(0, 60))}）</span>`
+          : ''}
       </div>
       <div class="jc-actions">
         <button onclick="toggleJob('${j.id}')">${scanState.expanded[j.id] ? '收起' : '展开结果'}</button>
@@ -1712,9 +1851,11 @@ async function renderGroups() {
 
   if (res.source === 'restricted') {
     html += lookupPanelHtml();
+    html += '<div id="notesBoxGroups"></div>';
     html += '<div id="interestsBox"></div>';
   } else if (!groups.length) {
     html += '<div class="empty">没有找到加入的小组</div>';
+    html += '<div id="notesBoxGroups"></div>';
   } else {
     html += `<div class="list-header">加入的小组（${esc(d.total || groups.length)}）</div>`;
     html += groups.map(g => `
@@ -1731,8 +1872,10 @@ async function renderGroups() {
         </div>
         <div class="g-arrow">›</div>
       </div>`).join('');
+    html += '<div id="notesBoxGroups"></div>';
   }
   box.innerHTML = html;
+  mountNotes('notesBoxGroups', currentUser.id, currentUser.name);
   if (res.source === 'restricted') loadInterests(currentUser.id);
 }
 
@@ -1769,7 +1912,8 @@ async function renderUserPosts(more) {
         <div class="meta">${isSelf ? '完整发言记录（真实数据）' : '历史发言记录'}</div>
       </div>
     </div>
-    ${banner(res)}`;
+    ${banner(res)}
+    <div id="notesBoxPosts"></div>`;
 
   if (!topics.length && !more) {
     if (res.source === 'restricted') {
@@ -1778,6 +1922,7 @@ async function renderUserPosts(more) {
       html += '<div class="empty">没有找到发言记录</div>';
     }
     box.innerHTML = html;
+    mountNotes('notesBoxPosts', currentUser.id, currentUser.name);
     return;
   }
 
@@ -1803,6 +1948,7 @@ async function renderUserPosts(more) {
       加载更多（已显示 ${topicsState.loaded}/${topicsState.total}）</div>`;
   }
   box.innerHTML = html;
+  if (!more) mountNotes('notesBoxPosts', currentUser.id, currentUser.name);
 }
 
 /* ---------- 视图3b：小组近期话题（真实数据） ---------- */
@@ -1843,6 +1989,475 @@ async function renderGroupTopics(groupId, groupName) {
   box.innerHTML = html;
 }
 
+/* ==================================================================
+   手动补充记录（notes）
+   豆瓣查不到的东西 —— 帖子网址 / 截图 / 你私下知道的线索 —— 自己补进来，
+   按 uid 记住，下次查同一个 ID 自动一起显示。
+   存储：本机模式走后端文件；共享部署/纯静态页自动回落浏览器 localStorage。
+   ================================================================== */
+let notesCtx = { uid: '', name: '', items: [], mode: 'local', containerId: '' };
+let noteDialog = { tab: 'url', image: '' };
+
+const NOTE_LS_PREFIX = 'douban_notes_';
+
+function noteLsKey(uid) { return NOTE_LS_PREFIX + uid; }
+
+function noteLocalLoad(uid) {
+  try { return JSON.parse(lsGet(noteLsKey(uid)) || '[]') || []; } catch (e) { return []; }
+}
+
+function noteLocalSave(uid, items) {
+  try {
+    localStorage.setItem(noteLsKey(uid), JSON.stringify(items.slice(0, 200)));
+    return true;
+  } catch (e) {
+    alert('浏览器本地存储已满（图片太多）。请删掉几条旧记录，或改用「导出备份」后清理。');
+    return false;
+  }
+}
+
+function nowStr() {
+  const d = new Date(), p = n => String(n).padStart(2, '0');
+  return d.getFullYear() + '-' + p(d.getMonth() + 1) + '-' + p(d.getDate()) + ' ' +
+         p(d.getHours()) + ':' + p(d.getMinutes()) + ':' + p(d.getSeconds());
+}
+
+function extractTopicId(text) {
+  const m = String(text || '').match(/\/group\/topic\/(\d+)/i);
+  return m ? m[1] : '';
+}
+
+function toTags(v) {
+  const arr = Array.isArray(v) ? v : String(v || '').split(/[,，;；\s]+/);
+  const out = [];
+  arr.forEach(x => {
+    const t = String(x || '').trim();
+    if (t && t.length <= 16 && out.indexOf(t) < 0) out.push(t);
+  });
+  return out.slice(0, 8);
+}
+
+/* 读：优先后端，共享模式/离线回落浏览器 */
+async function fetchNotes(uid) {
+  uid = String(uid);
+  try {
+    const r = await fetch(API + '/api/notes/' + encodeURIComponent(uid),
+                          { headers: credHeaders() });
+    const j = await r.json();
+    if (j && j.ok && j.data) {
+      return { mode: 'server', items: j.data.items || [] };
+    }
+    if (j && j.source === 'local_only') {
+      return { mode: 'local', items: noteLocalLoad(uid) };
+    }
+  } catch (e) { /* 后端不可达（如纯静态部署）→ 用浏览器本地 */ }
+  return { mode: 'local', items: noteLocalLoad(uid) };
+}
+
+function noteUpsertLocal(uid, payload) {
+  const items = noteLocalLoad(uid);
+  const tid = payload.topic_id || extractTopicId(payload.url || payload.text || '');
+  if (tid) {
+    const i = items.findIndex(x => x && x.topic_id && String(x.topic_id) === String(tid));
+    if (i >= 0) {
+      const x = items[i];
+      if (payload.text) x.text = payload.text;
+      if (payload.title) x.title = payload.title;
+      if (payload.image) x.image = payload.image;
+      if (payload.tags && payload.tags.length) {
+        x.tags = toTags([].concat(x.tags || [], payload.tags));
+      }
+      x.updated_at = nowStr();
+      noteLocalSave(uid, items);
+      return items;
+    }
+  }
+  items.unshift(Object.assign({
+    id: 'n' + Date.now().toString(36) + Math.random().toString(36).slice(2, 6),
+    kind: 'text', url: '', topic_id: tid || '', group_id: '', group_name: '',
+    title: '', text: '', image: '', created_at: nowStr(), pinned: false,
+  }, payload, { tags: toTags(payload.tags || []) }));
+  noteLocalSave(uid, items);
+  return items;
+}
+
+async function persistNote(payload) {
+  const uid = notesCtx.uid;
+  if (notesCtx.mode === 'server') {
+    const r = await fetch(API + '/api/notes/' + encodeURIComponent(uid), {
+      method: 'POST',
+      headers: Object.assign({ 'Content-Type': 'application/json' }, credHeaders()),
+      body: JSON.stringify(payload),
+    });
+    const j = await r.json().catch(() => ({}));
+    if (j && j.ok && j.data) return j.data.items || [];
+    if (j && j.source === 'local_only') {      // 后端不收 → 就地转本地
+      notesCtx.mode = 'local';
+    } else {
+      throw new Error(j.message || '保存失败');
+    }
+  }
+  return noteUpsertLocal(uid, payload);
+}
+
+async function removeNote(itemId) {
+  const uid = notesCtx.uid;
+  if (notesCtx.mode === 'server') {
+    const r = await fetch(API + '/api/notes/' + encodeURIComponent(uid) + '/' +
+                          encodeURIComponent(itemId),
+                          { method: 'DELETE', headers: credHeaders() });
+    const j = await r.json().catch(() => ({}));
+    if (j && j.ok && j.data) return j.data.items || [];
+    if (!(j && j.source === 'local_only')) throw new Error(j.message || '删除失败');
+    notesCtx.mode = 'local';
+  }
+  const items = noteLocalLoad(uid).filter(x => String(x.id) !== String(itemId));
+  noteLocalSave(uid, items);
+  return items;
+}
+
+async function toggleNotePin(itemId) {
+  const uid = notesCtx.uid;
+  if (notesCtx.mode === 'server') {
+    const r = await fetch(API + '/api/notes/' + encodeURIComponent(uid) + '/pin', {
+      method: 'POST',
+      headers: Object.assign({ 'Content-Type': 'application/json' }, credHeaders()),
+      body: JSON.stringify({ item_id: itemId }),
+    });
+    const j = await r.json().catch(() => ({}));
+    if (j && j.ok && j.data) return j.data.items || [];
+    if (!(j && j.source === 'local_only')) throw new Error(j.message || '操作失败');
+    notesCtx.mode = 'local';
+  }
+  const items = noteLocalLoad(uid);
+  items.forEach(x => { if (String(x.id) === String(itemId)) x.pinned = !x.pinned; });
+  noteLocalSave(uid, items);
+  return items;
+}
+
+/* ---------- 渲染 ---------- */
+const NOTE_KIND_LABEL = { url: '🔗 帖子', image: '🖼 截图', text: '✍️ 手写' };
+
+function noteCardHtml(n) {
+  const tags = (n.tags || []).map(t => `<span class="note-tag">${esc(t)}</span>`).join('');
+  const link = n.url
+    ? `<a class="note-link" href="${esc(n.url)}" target="_blank" rel="noopener">🔗 打开原帖</a>`
+    : '';
+  const img = n.image
+    ? `<img class="note-img" src="${esc(n.image)}" alt="截图" onclick="viewImg(this.src)">`
+    : '';
+  return `
+    <div class="note-item ${n.pinned ? 'pinned' : ''}">
+      <div class="note-head">
+        <span class="note-badge">手动补充</span>
+        <span class="note-badge kind">${NOTE_KIND_LABEL[n.kind] || '✍️ 手写'}</span>
+        ${n.pinned ? '<span class="note-badge pin">📌 置顶</span>' : ''}
+        <span class="note-time">${esc(n.created_at || '')}</span>
+      </div>
+      ${n.title ? `<div class="note-title">${esc(n.title)}</div>` : ''}
+      ${n.text ? `<div class="note-text">${esc(n.text)}</div>` : ''}
+      ${img}
+      ${link}
+      ${tags ? `<div class="note-tags">${tags}</div>` : ''}
+      <div class="note-acts">
+        <span onclick="onPinNote('${esc(n.id)}')">${n.pinned ? '取消置顶' : '📌 置顶'}</span>
+        <span onclick="onDeleteNote('${esc(n.id)}')">🗑 删除</span>
+      </div>
+    </div>`;
+}
+
+function notesHtml() {
+  const items = notesCtx.items || [];
+  let h = `<div class="note-sec-title">📌 我补充的记录
+      <span class="cnt">${items.length} 条 · 只有你自己能看到</span></div>`;
+  if (!items.length) {
+    h += `<div class="note-item"><div class="note-text" style="color:#8a7c55">
+        还没有补充记录。豆瓣接口查不到的内容（帖子网址、聊天截图、你私下知道的线索）
+        可以点下面的按钮加进来，下次再查这个 ID 会自动一起显示。</div></div>`;
+  } else {
+    h += items.map(noteCardHtml).join('');
+  }
+  h += `
+    <div class="note-toolbar">
+      <div class="note-btn solid" onclick="openNoteModal()">➕ 补充记录</div>
+      <div class="note-btn" onclick="exportNotes()">⬇️ 导出备份</div>
+      <div class="note-btn" onclick="importNotes()">⬆️ 导入</div>
+    </div>
+    <div class="note-mode-tip">${notesCtx.mode === 'local'
+      ? '💾 存在你自己浏览器里（换设备 / 清缓存会丢，建议偶尔导出备份）'
+      : '💾 存在本机 backend/data/notes.json（换浏览器也还在）'}</div>`;
+  return h;
+}
+
+async function mountNotes(containerId, uid, name) {
+  const el = $(containerId);
+  if (!el) return;
+  notesCtx.uid = String(uid || '');
+  notesCtx.name = name || '';
+  notesCtx.containerId = containerId;
+  const res = await fetchNotes(notesCtx.uid);
+  notesCtx.items = res.items;
+  notesCtx.mode = res.mode;
+  el.innerHTML = notesHtml();
+}
+
+async function refreshNotesBox() {
+  const res = await fetchNotes(notesCtx.uid);
+  notesCtx.items = res.items;
+  notesCtx.mode = res.mode;
+  const el = $(notesCtx.containerId);
+  if (el) el.innerHTML = notesHtml();
+}
+
+async function onDeleteNote(itemId) {
+  if (!confirm('删除这条补充记录？删了就找不回来了。')) return;
+  try {
+    notesCtx.items = await removeNote(itemId);
+    const el = $(notesCtx.containerId);
+    if (el) el.innerHTML = notesHtml();
+  } catch (e) { alert(e.message); }
+}
+
+async function onPinNote(itemId) {
+  try {
+    notesCtx.items = await toggleNotePin(itemId);
+    const el = $(notesCtx.containerId);
+    if (el) el.innerHTML = notesHtml();
+  } catch (e) { alert(e.message); }
+}
+
+/* ---------- 弹窗 ---------- */
+function openNoteModal(uid, name) {
+  if (uid) { notesCtx.uid = String(uid); notesCtx.name = name || ''; }
+  if (!notesCtx.uid) return;
+  $('noteForWhom').textContent = '目标：' + (notesCtx.name || '(未命名)') +
+    '（uid ' + notesCtx.uid + '）';
+  ['noteUrl', 'noteTitle', 'noteBody', 'noteTags', 'noteText'].forEach(id => { $(id).value = ''; });
+  $('noteUrlMsg').textContent = '';
+  $('noteImgMsg').textContent = '';
+  $('noteImageFile').value = '';
+  $('noteImagePreview').style.display = 'none';
+  $('noteImagePreview').src = '';
+  noteDialog.image = '';
+  const st = $('noteSaveStatus');
+  st.textContent = ''; st.className = 'm-status';
+  $('noteSaveBtn').disabled = false; $('noteSaveBtn').textContent = '保存这条补充记录';
+  switchNoteTab('url');
+  $('noteModal').classList.add('show');
+}
+
+function closeNoteModal() { $('noteModal').classList.remove('show'); }
+
+function switchNoteTab(t) {
+  noteDialog.tab = t;
+  ['url', 'image', 'text'].forEach(k => {
+    $('ntab-' + k).classList.toggle('active', k === t);
+    $('npane-' + k).classList.toggle('active', k === t);
+  });
+}
+
+/* 粘贴网址 → 自动带出标题（需要登录态；拿不到就让用户手填） */
+async function autoFillFromUrl() {
+  const raw = ($('noteUrl').value || '').trim();
+  const msg = $('noteUrlMsg');
+  if (!raw) { msg.textContent = '请先粘贴网址'; return; }
+  const tid = extractTopicId(raw);
+  if (!tid) {
+    msg.textContent = '没识别出帖子 ID，请确认链接形如 douban.com/group/topic/123456789/';
+    return;
+  }
+  msg.textContent = '正在查询话题 ' + tid + ' …';
+  try {
+    const j = await (await fetch(API + '/api/topic/' + tid, { headers: credHeaders() })).json();
+    if (j.ok && j.data && j.data.title) {
+      $('noteTitle').value = j.data.title;
+      if (j.data.group_name) {
+        msg.textContent = '✅ 已带出：' + j.data.title + '（' + j.data.group_name + '）';
+      } else {
+        msg.textContent = '✅ 已带出标题（话题 ' + tid + '）';
+      }
+      if (!notesCtx.name && j.data.author_name) {
+        $('noteForWhom').textContent = '目标：' + j.data.author_name +
+          '（uid ' + (j.data.author_id || notesCtx.uid) + '）';
+      }
+    } else {
+      $('noteTitle').value = '帖子 ' + tid;
+      msg.textContent = '⚠️ ' + ((j && j.message) || '拿不到标题') + '（已先填「帖子 ' + tid + '」，可手动改）';
+    }
+  } catch (e) {
+    $('noteTitle').value = '帖子 ' + tid;
+    msg.textContent = '⚠️ 后端不可用，已先填「帖子 ' + tid + '」，请手动改标题';
+  }
+}
+
+/* 截图：先压缩再存，避免把浏览器存储撑爆 */
+function onNoteImage(ev) {
+  const f = (ev.target.files || [])[0];
+  const msg = $('noteImgMsg');
+  if (!f) return;
+  if (!/^image\//.test(f.type)) { msg.textContent = '请选图片文件'; return; }
+  msg.textContent = '正在压缩…';
+  const reader = new FileReader();
+  reader.onload = () => {
+    const img = new Image();
+    img.onload = () => {
+      const MAX = 1400;
+      let w = img.width, h = img.height;
+      if (w > MAX || h > MAX) {
+        const r = Math.min(MAX / w, MAX / h);
+        w = Math.round(w * r); h = Math.round(h * r);
+      }
+      const cv = document.createElement('canvas');
+      cv.width = w; cv.height = h;
+      cv.getContext('2d').drawImage(img, 0, 0, w, h);
+      let data = cv.toDataURL('image/jpeg', 0.72);
+      // 还是太大就再压一次
+      if (data.length > 900 * 1024) data = cv.toDataURL('image/jpeg', 0.5);
+      noteDialog.image = data;
+      const pv = $('noteImagePreview');
+      pv.src = data; pv.style.display = 'block';
+      msg.textContent = '✅ 已压缩到 ' + Math.round(data.length / 1024) + ' KB（' + w + '×' + h + '）';
+      if (!$('noteTitle').value) $('noteTitle').value = '截图证据 ' + nowStr().slice(0, 10);
+    };
+    img.onerror = () => { msg.textContent = '这张图读不出来，换一张试试'; };
+    img.src = reader.result;
+  };
+  reader.readAsDataURL(f);
+}
+
+async function saveNote() {
+  const btn = $('noteSaveBtn'), st = $('noteSaveStatus');
+  const tab = noteDialog.tab;
+  const title = ($('noteTitle').value || '').trim();
+  const body = ($('noteBody').value || '').trim();
+  const tags = toTags($('noteTags').value);
+  let payload = { kind: tab, title: title, text: body, tags: tags, source: 'manual' };
+
+  if (tab === 'url') {
+    const raw = ($('noteUrl').value || '').trim();
+    if (!raw) { st.className = 'm-status err'; st.textContent = '请先粘贴帖子网址'; return; }
+    const tid = extractTopicId(raw);
+    if (!tid) {
+      st.className = 'm-status err';
+      st.textContent = '链接里没识别出帖子 ID（应为 …/group/topic/数字/）';
+      return;
+    }
+    payload.url = raw.match(/https?:\/\/\S+/)
+      ? raw.match(/https?:\/\/\S+/)[0].replace(/[）)，,。]+$/, '')
+      : 'https://www.douban.com/group/topic/' + tid + '/';
+    payload.topic_id = tid;
+    if (!title) payload.title = '帖子 ' + tid;
+  } else if (tab === 'image') {
+    if (!noteDialog.image) { st.className = 'm-status err'; st.textContent = '请先选一张截图'; return; }
+    payload.image = noteDialog.image;
+  } else {
+    const kw = ($('noteText').value || '').trim();
+    if (!kw && !body && !title) {
+      st.className = 'm-status err';
+      st.textContent = '至少写一点内容（关键词或说明）';
+      return;
+    }
+    payload.text = [kw, body].filter(Boolean).join('\n');
+    if (!title) payload.title = kw.slice(0, 30) || '手写记录';
+  }
+
+  btn.disabled = true; btn.textContent = '保存中…';
+  st.className = 'm-status'; st.textContent = '';
+  try {
+    notesCtx.items = await persistNote(payload);
+    st.className = 'm-status ok';
+    st.textContent = '✅ 已保存，下次查这个 ID 会自动显示';
+    refreshNotesBox();
+    setTimeout(closeNoteModal, 700);
+  } catch (e) {
+    st.className = 'm-status err';
+    st.textContent = '❌ ' + (e.message || '保存失败');
+    btn.disabled = false; btn.textContent = '重试';
+  }
+}
+
+function viewImg(src) {
+  $('imgViewerImg').src = src;
+  $('imgViewer').classList.add('show');
+}
+function closeImgViewer() { $('imgViewer').classList.remove('show'); }
+
+/* ---------- 备份：导出 / 导入 ---------- */
+function downloadJson(obj, filename) {
+  const blob = new Blob([JSON.stringify(obj, null, 1)], { type: 'application/json' });
+  const a = document.createElement('a');
+  a.href = URL.createObjectURL(blob);
+  a.download = filename;
+  document.body.appendChild(a); a.click();
+  setTimeout(() => { URL.revokeObjectURL(a.href); a.remove(); }, 1000);
+}
+
+async function exportNotes() {
+  const stamp = nowStr().slice(0, 10).replace(/-/g, '');
+  if (notesCtx.mode === 'server') {
+    try {
+      const j = await (await fetch(API + '/api/notes/export/all', { headers: credHeaders() })).json();
+      if (j && j.ok) { downloadJson(j.data, 'douban-notes-' + stamp + '.json'); return; }
+    } catch (e) { /* 落到下面本地导出 */ }
+  }
+  const users = {};
+  for (let i = 0; i < localStorage.length; i++) {
+    const k = localStorage.key(i);
+    if (k && k.indexOf(NOTE_LS_PREFIX) === 0) {
+      const uid = k.slice(NOTE_LS_PREFIX.length);
+      try { users[uid] = { items: JSON.parse(localStorage.getItem(k) || '[]') }; } catch (e) {}
+    }
+  }
+  downloadJson({ version: 1, scope: 'local', users: users, exported_at: nowStr() },
+               'douban-notes-' + stamp + '.json');
+}
+
+function importNotes() {
+  const inp = document.createElement('input');
+  inp.type = 'file';
+  inp.accept = '.json,application/json';
+  inp.onchange = async () => {
+    const f = (inp.files || [])[0];
+    if (!f) return;
+    let data;
+    try { data = JSON.parse(await f.text()); } catch (e) { alert('这个文件不是合法的 JSON'); return; }
+    const users = data.users || (data.data && data.data.users) || null;
+    if (!users) { alert('备份格式不对：缺少 users 字段'); return; }
+    if (!confirm('导入会合并到当前记录（同一条帖子会合并，不会重复）。继续？')) return;
+
+    if (notesCtx.mode === 'server') {
+      try {
+        // 服务端导入是整分区覆盖：先把现有记录并进备份，再提交
+        const cur = await (await fetch(API + '/api/notes/export/all', { headers: credHeaders() })).json();
+        const merged = (cur && cur.ok && cur.data && cur.data.users) ? cur.data.users : {};
+        Object.keys(users).forEach(uid => {
+          const a = (merged[uid] && merged[uid].items) || [];
+          const b = users[uid].items || [];
+          const seen = {};
+          a.forEach(x => { seen[(x.topic_id || x.id)] = 1; });
+          merged[uid] = { items: a.concat(b.filter(x => !seen[(x.topic_id || x.id)])) };
+        });
+        const r = await (await fetch(API + '/api/notes/import/all', {
+          method: 'POST',
+          headers: Object.assign({ 'Content-Type': 'application/json' }, credHeaders()),
+          body: JSON.stringify({ users: merged }),
+        })).json();
+        if (r && r.ok) { alert('✅ 导入完成'); refreshNotesBox(); return; }
+      } catch (e) { /* 落到本地导入 */ }
+    }
+    Object.keys(users).forEach(uid => {
+      const cur = noteLocalLoad(uid);
+      const seen = {};
+      cur.forEach(x => { seen[(x.topic_id || x.id)] = 1; });
+      const add = (users[uid].items || []).filter(x => !seen[(x.topic_id || x.id)]);
+      noteLocalSave(uid, cur.concat(add));
+    });
+    alert('✅ 已导入到浏览器本地存储');
+    refreshNotesBox();
+  };
+  inp.click();
+}
+
 /* ---------- 反查他人发言（含发帖/回帖两种模式） ---------- */
 let lkMode = 'posts';  // 'posts' | 'comments'
 
@@ -1858,6 +2473,11 @@ function switchLkMode(m) {
   btnP.className = 'lp-mode' + (m === 'posts' ? ' active' : '');
   btnC.className = 'lp-mode' + (m === 'comments' ? ' active' : '');
   $('lkBtn').textContent = m === 'posts' ? '开始反查发帖' : '开始反查回帖';
+  const warn = $('lkLoginWarn');
+  if (warn) {
+    const need = m === 'comments' && !(loginState && loginState.token_valid);
+    warn.style.display = need ? 'block' : 'none';
+  }
   $('lkResult').innerHTML = '';
 }
 
@@ -1883,6 +2503,13 @@ function lookupPanelHtml() {
           <input id="lkPages" type="number" min="1" max="5" value="2">
         </div>
       </div>
+      <div class="lp-hint" id="lkLoginWarn"
+           style="display:none;background:#fff4e6;color:#c2410c;border-radius:8px;
+                  padding:9px 11px;margin-bottom:10px">
+        ⚠️ <b>回帖反查需要先登录</b>：豆瓣已把「评论/回帖」接口改成必须登录才能查看，
+        匿名请求会被拒绝。请先点右上角「登录」，用你自己的豆瓣账号登录后再反查回帖。
+        <span class="relink" onclick="openTokenModal()">点此登录 →</span>
+      </div>
       <button class="lp-btn" id="lkBtn" onclick="doReverseLookup()">开始反查发帖</button>
       <button class="lp-btn ghost" onclick="toggleGroupSearch()">不知道怎么找小组 ID？按关键词搜索小组</button>
       <div id="sgBox" style="display:none;margin-top:12px">
@@ -1896,7 +2523,8 @@ function lookupPanelHtml() {
       <div id="lkResult"></div>
       <div class="lp-hint">
         说明：只能覆盖各小组的「最近内容」（每页 50 条 × 扫描页数），不是全量历史。
-        选 <b>回帖</b> 模式时还会扫话题评论区（评论接口公开可访问）。
+        <b>回帖</b>模式会扫话题评论区 —— 豆瓣现在要求登录后才能读评论，
+        所以回帖反查必须先登录（登录后基本不会再遇到「反爬」提示）。
       </div>
     </div>`;
 }
@@ -1971,14 +2599,29 @@ async function doReverseLookup() {
 
   if (lkMode === 'comments') {
     const items = d.comments || [];
+    // 豆瓣评论接口要求登录：这时不是反爬，也不是「没找到」，要明确告诉用户去登录
+    if (d.need_login || res.source === 'restricted') {
+      box.innerHTML = `<div class="info-banner" style="background:#fff4e6;color:#b45309">
+        <div class="ib-title">🔐 回帖反查需要登录豆瓣账号</div>
+        ${esc(res.message || '豆瓣的评论/回帖接口已不再对匿名开放，请先登录后再查。')}
+        <div style="margin-top:8px">
+          <span class="relink" onclick="openTokenModal()">点此登录 →</span>
+        </div>
+        <div style="margin-top:8px;font-size:12px;color:#8a6a3a">
+          这不是「疑似机器人」的风控提示 —— 登录之后就能正常反查回帖，
+          不需要等冷却，也不需要降低扫描页数。
+        </div>
+      </div>`;
+      return;
+    }
     let html = '<div class="info-banner"><div class="ib-title">回帖反查完成</div>' + esc(d.note || '') + '</div>';
     if (d.warning) {
       html += `<div class="info-banner" style="background:#fff4e6;color:#c2410c">
-        <div class="ib-title">⚠️ 触发反爬</div>${esc(d.warning)}</div>`;
+        <div class="ib-title">⚠️ 部分小组被限流</div>${esc(d.warning)}</div>`;
     }
     if (!items.length) {
       html += '<div class="empty">这批小组里没有找到 TA 的近期回帖<br>' +
-              '<small>可减少候选小组 / 降低扫描页数后重试</small></div>';
+              '<small>可增加候选小组 / 提高扫描页数后重试</small></div>';
     } else {
       html += `<div class="list-header">命中 ${items.length} 条回帖</div>`;
       html += items.map(c => `

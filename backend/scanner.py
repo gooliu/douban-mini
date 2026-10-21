@@ -114,6 +114,11 @@ async def _scan_one_topic_comments(job: ScanJob, topic: dict, gid: str, gname: s
             r = await cl.get_topic_comments(topic["id"], 0, COMMENT_COUNT_PER_TRY)
             break
         except DoubanError as e:
+            # 登录态问题（403 need_permission / 103 失效）不是反爬：
+            # 退避重试毫无意义，直接终止整轮回帖扫描并如实记录原因。
+            if e.need_login:
+                job.blocked["__login__"] = e.msg
+                return "blocked"
             if e.code == 1000:
                 backoff = COMMENT_BACKOFFS[min(attempt, len(COMMENT_BACKOFFS) - 1)]
                 job.notes.append(f"反爬 1000（话题 {topic['id']}），退避 {backoff}s")
@@ -241,11 +246,13 @@ async def _run_job(job: ScanJob) -> None:
                         result = await _scan_one_topic_comments(job, t, gid, gname)
                         if result == "canceled":
                             break
-                        if result == "blocked" and job.blocked.get("__token__"):
+                        # 登录态问题（需重新登录 / token 失效）→ 整轮终止，别继续刷 403
+                        if result == "blocked" and (job.blocked.get("__token__")
+                                                    or job.blocked.get("__login__")):
                             break
                     if job.status == "canceled":
                         break
-                    if job.blocked.get("__token__"):
+                    if job.blocked.get("__token__") or job.blocked.get("__login__"):
                         break
 
                 # 更新进度：最早/最晚时间（按时间倒序的话题列表）

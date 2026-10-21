@@ -68,11 +68,19 @@ MAX_SCAN_PAGES = int(os.getenv("DOUBAN_SCAN_PAGES", "5"))       # 反查发言�
 
 
 class DoubanError(Exception):
-    """豆瓣接口错误"""
+    """豆瓣接口错误
 
-    def __init__(self, code: int, msg: str):
+    属性 need_login 很关键：豆瓣很多接口（评论/回帖、话题详情等）现在匿名一律返回
+    HTTP 403 + code=1000 + msg="need_permission"（localized_message 是那句
+    「你访问豆瓣的方式有点像机器人程序，请登录」）。
+    如果只看 code=1000 就报「机器人反爬」并进入冷却，既误导又会越点越糟。
+    因此这里单独打标，上层据此提示「请先登录」而不是「疑似机器人」。
+    """
+
+    def __init__(self, code: int, msg: str, need_login: bool = False):
         self.code = code
         self.msg = msg
+        self.need_login = need_login
         super().__init__(f"[douban {code}] {msg}")
 
 
@@ -190,12 +198,15 @@ class DoubanClient:
                     hint = {
                         103: "登录信息失效：token 已过期，请重新抓取豆瓣 App 的 Bearer token"
                              "（或改用网页 Cookie 登录，见弹窗下方）",
-                        1000: f"豆瓣判定为机器人程序（反爬），已自动冷却 "
-                              f"{self.cooldown_remaining()} 秒。请勿连续点击，"
-                              f"公开数据会自动改用备用通道",
+                        1000: (f"豆瓣要求登录后才能查看：{e.msg}"
+                               if e.need_login else
+                               f"豆瓣判定为机器人程序（反爬），已自动冷却 "
+                               f"{self.cooldown_remaining()} 秒。请勿连续点击，"
+                               f"公开数据会自动改用备用通道"),
                         997: "签名错误",
                     }.get(e.code, e.msg)
-                    return {"valid": False, "code": e.code, "msg": e.msg, "hint": hint}
+                    return {"valid": False, "code": e.code, "msg": e.msg,
+                            "need_login": e.need_login, "hint": hint}
             else:
                 uid = None
                 for t in (r.get("topics") or []):
@@ -226,9 +237,12 @@ class DoubanClient:
             except DoubanError as e:
                 hint = {
                     103: "Cookie 登录失效：豆瓣不认这个 Cookie（可能已登出或需要复制完整的 dbcl2）",
-                    1000: "豆瓣判定为机器人程序（反爬），请稍后重试",
+                    1000: (f"豆瓣要求登录后才能查看：{e.msg}"
+                           if e.need_login else
+                           "豆瓣判定为机器人程序（反爬），请稍后重试"),
                 }.get(e.code, e.msg)
-                return {"valid": False, "code": e.code, "msg": e.msg, "hint": hint}
+                return {"valid": False, "code": e.code, "msg": e.msg,
+                        "need_login": e.need_login, "hint": hint}
             self._self_uid = str(uid)
             self._self_uid_ts = time.time()
             out = {"valid": True, "code": 0, "msg": "Cookie 登录有效", "via": "cookie",
@@ -332,7 +346,8 @@ class DoubanClient:
             headers["Cookie"] = self.cookie
         if need_auth:
             if not self.token and not self.cookie:
-                raise DoubanError(1000, "该接口需要登录态，请在网页右上角「登录」里配置 token 或 Cookie")
+                raise DoubanError(1000, "该接口需要登录态，请在网页右上角「登录」里配置 token 或 Cookie",
+                                  need_login=True)
             if self.token:
                 headers["Authorization"] = f"Bearer {self.token}"
 
@@ -348,13 +363,28 @@ class DoubanClient:
             msg = err.get("localized_message") or err.get("msg", resp.text[:100])
         except ValueError:
             code, msg = resp.status_code, f"HTTP {resp.status_code}: {resp.text[:100]}"
+        # 关键：豆瓣把「需要登录」也塞在 code=1000 里，靠 msg 区分。
+        #   msg="need_permission"                    → 需要登录（带凭证重试即可，不该冷却）
+        #   msg="invalid_signature" / 其他            → 真·风控反爬（才需要冷却）
+        raw_msg = str(err.get("msg") or "").strip().lower()
+        if code == 1000 and raw_msg in ("need_permission", "need_login"):
+            raise DoubanError(
+                1000,
+                "豆瓣要求登录后才能查看：该接口（回帖/评论、话题详情）已不再对匿名开放。"
+                "请点右上角「登录」粘贴你的豆瓣 Cookie 或 Bearer token 后重试。",
+                need_login=True)
+        if code == 103:
+            # 登录信息失效 —— 同样属于「需要重新登录」，不是反爬。
+            # 缓存判定结果，别再带着失效 token 反复请求（会招来风控）
+            if need_auth and self.token:
+                self._token_dead_until = time.time() + 600
+            raise DoubanError(103, "登录信息失效（豆瓣 code=103）："
+                                   "token 已过期或 Cookie 不被接受，请重新登录后重试。",
+                              need_login=True)
         if code == 1000:
             secs = self.mark_blocked()
             msg = (f"豆瓣判定为机器人程序（反爬），已进入冷却 {secs}s。"
                    f"请勿连续点击；公开数据会自动改用备用通道")
-        if code == 103 and need_auth and self.token:
-            # token 已失效：缓存判定结果，别再带着失效 token 反复请求（会招来风控）
-            self._token_dead_until = time.time() + 600
         raise DoubanError(code, msg)
 
     async def _request_rexxar(self, full_path: str, params: dict | None) -> Any:
@@ -469,40 +499,75 @@ class DoubanClient:
         return await self._request("/api/v2/search/user",
                                    {"q": q, "start": start, "count": count})
 
-    async def get_topic_comments(self, topic_id: str, start: int = 0, count: int = 20) -> dict:
-        """单条话题的评论列表（公开接口，反查他人回帖的基础）
+    async def get_topic(self, topic_id: str, need_auth: bool | None = None) -> dict:
+        """话题详情（标题 / 摘要 / 作者 / 所属小组）
+
+        同样需要登录态：匿名会得到 403 need_permission。
+        """
+        if need_auth is None:
+            need_auth = bool(self.token or self.cookie)
+        return await self._request(f"/api/v2/group/topic/{topic_id}", None,
+                                   need_auth=need_auth)
+
+    async def get_topic_comments(self, topic_id: str, start: int = 0, count: int = 20,
+                                 need_auth: bool | None = None) -> dict:
+        """单条话题的评论列表（反查他人回帖的基础）
 
         返回 popular_comments + comments 数组，每条评论带 author.id / author.name / text / create_time
+
+        重要：豆瓣已把评论接口改成**必须登录**。匿名请求会得到
+        HTTP 403 + code=1000 + msg="need_permission"（注意不是反爬）。
+        所以：只要手上有凭证就默认带上；need_auth=None 表示"有凭证就带"。
         """
+        if need_auth is None:
+            need_auth = bool(self.token or self.cookie)
         return await self._request(f"/api/v2/group/topic/{topic_id}/comments",
-                                   {"start": start, "count": count})
+                                   {"start": start, "count": count},
+                                   need_auth=need_auth)
 
     async def scan_author_comments_in_groups(self, user_id: str,
                                              group_ids: list[str],
                                              topic_pages: int = 2,
                                              comments_per_topic: int = 20) -> list[dict]:
-        """【反查他人回帖 · 公开接口】遍历指定小组的近期话题，扫其评论区过滤该用户
+        """【反查他人回帖】遍历指定小组的近期话题，扫其评论区过滤该用户
 
-        原理：group topic comments 接口公开，扫描最近 N 个话题 × 每话题前 20 条评论。
-        限制：
-          1. 覆盖范围取决于"用户在哪些小组近期话题里回过帖"
-          2. 频繁调用会触发豆瓣反爬（错误码 1000「你访问豆瓣的方式有点像机器人程序」），
-             建议加大 comments_per_topic 减少请求数，或降低 topic_pages 减少总请求量
+        原理：group topic comments 接口返回每条评论的 author.id，按 uid 过滤即可。
+
+        ⚠️ 重要变更（豆瓣侧）：评论接口已不再对匿名开放。
+           匿名请求返回 HTTP 403 + code=1000 + msg="need_permission"。
+           因此本方法在**没有凭证**时会直接返回 {need_login: True} 并说明原因，
+           不再逐个话题去撞接口（否则只会刷出一堆无用 403，还容易连累其他接口）。
 
         参数：
           group_ids           候选小组 id 列表（最多 MAX_SCAN_GROUPS 个）
           topic_pages         每个小组扫描的话题页数（每页 50 条）
           comments_per_topic  每条话题最多扫多少条评论（建议 ≥20）
+
+        返回：
+          {"comments": [...], "need_login": bool, "reason": str, "blocked_groups": [...]}
         """
+        import random
+
         group_ids = [str(g).strip() for g in group_ids if str(g).strip()][:MAX_SCAN_GROUPS]
         topic_pages = max(1, min(int(topic_pages), MAX_SCAN_PAGES))
         comments_per_topic = max(1, min(int(comments_per_topic), 50))
-        # 反爬保护：每次评论请求间加少量抖动
-        import random
-        async def _throttle():
-            await asyncio.sleep(random.uniform(0.05, 0.15))
 
-        blocked_groups: list[str] = []  # 被反爬的小组
+        LOGIN_REASON = ("豆瓣的「评论/回帖」接口已改为必须登录后才能查看，"
+                        "匿名请求会被拒绝（403 need_permission）。"
+                        "请点右上角「登录」粘贴你的豆瓣 Cookie 或 Bearer token 后再试。")
+
+        # 1) 登录态预检：手上有凭证才继续，否则立刻给出明确原因
+        have_cred = bool(self.token or self.cookie)
+        if not have_cred:
+            return {"comments": [], "need_login": True, "reason": LOGIN_REASON,
+                    "blocked_groups": []}
+
+        # 2) 反爬保护：相邻评论请求之间做随机抖动（比 0.05~0.15s 更保守）
+        async def _throttle(extra: float = 0.0):
+            await asyncio.sleep(random.uniform(0.12, 0.30) + extra)
+
+        blocked_groups: list[str] = []   # 真·反爬（1000 非 need_permission）的小组
+        login_failed: list[str] = []      # 提示需要重新登录的小组
 
         async def scan_one(gid: str):
             nonlocal blocked_groups
@@ -526,19 +591,18 @@ class DoubanClient:
                     break
 
             # 2) 每条话题拉评论，过滤目标用户
-            #    反爬保护：每 5 条评论后额外停一会
-            stop_early = False
             for i, t in enumerate(all_topics):
-                if stop_early:
-                    break
                 try:
-                    await _throttle()
-                    cres = await self.get_topic_comments(t["id"], start=0, count=comments_per_topic)
+                    await _throttle(0.6 if i and i % 10 == 0 else 0.0)
+                    cres = await self.get_topic_comments(t["id"], start=0,
+                                                          count=comments_per_topic)
                 except DoubanError as e:
+                    if e.need_login:
+                        login_failed.append(gid)
+                        return out          # 登录态失效 → 整组停，别继续刷 403
                     if e.code == 1000:
                         blocked_groups.append(gid)
-                        stop_early = True
-                        break
+                        break               # 真反爬 → 停这一组，其他组继续
                     continue
                 for c in (cres.get("comments") or []) + (cres.get("popular_comments") or []):
                     a = c.get("author") or {}
@@ -572,13 +636,17 @@ class DoubanClient:
             uniq.append(x)
         uniq.sort(key=lambda x: x.get("create_time") or "", reverse=True)
         # 统一返回 dict（包含 comments 和可能的 warning）
-        result: dict = {"comments": uniq}
+        result: dict = {"comments": uniq, "need_login": False}
         if blocked_groups:
             result["blocked_groups"] = list(set(blocked_groups))
             result["warning"] = (
-                "评论接口触发了豆瓣反爬（错误 1000「你访问豆瓣的方式有点像机器人程序」）。"
-                "请减少候选小组数 / 降低扫描页数后重试，或带 DOUBAN_TOKEN 降低触发概率。"
+                "部分小组的评论接口触发了豆瓣反爬（错误 1000）。"
+                "已自动跳过这些小组，其余结果正常。"
+                "可减少候选小组数 / 降低扫描页数后再试。"
             )
+        if login_failed:
+            result["need_login"] = True
+            result["reason"] = LOGIN_REASON
         return result
 
     async def scan_author_posts_in_groups(self, user_id: str,

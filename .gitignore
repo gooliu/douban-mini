@@ -8,6 +8,11 @@ venv/
 # ⚠️ 登录凭证（含豆瓣 token / Cookie），绝不能提交到公开仓库
 backend/douban_config.json
 
+# ⚠️ 手动补充记录（私人笔记/截图），绝不能提交到公开仓库
+backend/data/
+backend/notes_data/
+data/notes.json
+
 # 运行日志
 backend/server.log
 backend/*.log

@@ -82,19 +82,14 @@ def wait_proxy():
         time.sleep(2)
 
 
-def main():
-    ap = argparse.ArgumentParser()
-    ap.add_argument("--token", default="")
-    ap.add_argument("--private", action="store_true", help="创建为私有仓库")
-    ap.add_argument("--skip-pages", action="store_true")
-    args = ap.parse_args()
-
-    token = args.token or os.environ.get("GH_TOKEN") or ""
+def run(token, private=False, skip_pages=False):
+    token = (token or "").strip()
     if not token:
         print("请输入 GitHub Personal Access Token（输入不回显，粘贴后回车）:")
         token = getpass.getpass("Token: ").strip()
     if not token:
         fail("没有 token")
+    args_private, args_skip_pages = private, skip_pages
 
     print("\n================ 0. 连通性检查 ================")
     info("代理: " + PROXY)
@@ -113,9 +108,9 @@ def main():
     code, repo = api("GET", "/repos/" + full, token)
     if code == 200:
         ok("仓库已存在: https://github.com/%s" % full)
-        if repo.get("private") != args.private:
-            want = "私有" if args.private else "公开"
-            code2, r2 = api("PATCH", "/repos/" + full, token, {"private": args.private})
+        if repo.get("private") != private:
+            want = "私有" if private else "公开"
+            code2, r2 = api("PATCH", "/repos/" + full, token, {"private": private})
             if code2 == 200:
                 ok("已调整为%s仓库（Pages 需要公开仓库才能免费开启）" % want)
             else:
@@ -124,14 +119,35 @@ def main():
         code2, r2 = api("POST", "/user/repos", token, {
             "name": REPO_NAME,
             "description": "豆瓣小组查询工具：查用户加入的小组、发帖与回帖历史",
-            "private": args.private,
+            "private": private,
             "auto_init": False,
             "has_issues": True,
             "has_wiki": False,
         })
-        if code2 not in (201, 200):
-            fail("创建仓库失败 (HTTP %s): %s" % (code2, r2.get("message")))
-        ok("仓库已创建: https://github.com/%s" % full)
+        if code2 in (201, 200):
+            ok("仓库已创建: https://github.com/%s" % full)
+        else:
+            warn("自动创建仓库失败 (HTTP %s): %s" % (code2, r2.get("message")))
+            print("")
+            print("  当前授权方式不允许程序新建仓库，麻烦你在网页上建一下（很快）：")
+            print("    1. 打开  https://github.com/new")
+            print("    2. Repository name 填： %s" % REPO_NAME)
+            print("    3. 选 Public（公开）")
+            print("    4. 下面三项都不要勾：README、.gitignore、License")
+            print("    5. 点绿色的 Create repository")
+            print("")
+            print("  建好后程序会自动接着做（等待中，最多 10 分钟）...")
+            sys.stdout.flush()
+            found = False
+            for _ in range(60):
+                time.sleep(10)
+                c3, _r3 = api("GET", "/repos/" + full, token)
+                if c3 == 200:
+                    found = True
+                    break
+            if not found:
+                fail("还没检测到仓库 %s，请在网页确认后重新运行" % full)
+            ok("检测到仓库已建好: https://github.com/%s" % full)
     else:
         fail("查询仓库失败 (HTTP %s): %s" % (code, repo.get("message")))
 
@@ -174,7 +190,7 @@ def main():
     ok("代码已推送到 main 分支")
     _state["run"] = time.time()
 
-    if args.skip_pages:
+    if skip_pages:
         print("\n已完成推送（跳过 Pages）")
         return
 
@@ -260,6 +276,15 @@ def main():
             return
         time.sleep(10)
     warn("网址暂时未返回正常页面，可能还在部署，稍后再访问即可")
+
+
+def main():
+    ap = argparse.ArgumentParser()
+    ap.add_argument("--token", default="")
+    ap.add_argument("--private", action="store_true", help="创建为私有仓库")
+    ap.add_argument("--skip-pages", action="store_true")
+    a = ap.parse_args()
+    run(a.token or os.environ.get("GH_TOKEN") or "", a.private, a.skip_pages)
 
 
 if __name__ == "__main__":

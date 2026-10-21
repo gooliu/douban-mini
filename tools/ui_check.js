@@ -148,6 +148,20 @@ async function main() {
   await check('回查结果文案', 'document.querySelector("#lkResult .ib-title")?.textContent');
   await check('回查结果全文', 'document.querySelector("#lkResult")?.innerText.slice(0,120)');
 
+  // 真实发帖反查：62914960 确实在小组 751504 发过帖，加深到 4 页后应命中
+  await evaluate('switchLkMode("posts")');
+  await evaluate('currentUser.id="62914960"');
+  await evaluate('document.getElementById("lkGroups").value="751504"');
+  await evaluate('document.getElementById("lkPages").value="4"');
+  await evaluate('doReverseLookup()');
+  await sleep(18000);
+  await check('发帖反查命中', 'document.querySelector("#lkResult .list-header")?.textContent || "未命中"');
+  await check('发帖反查摘要', 'document.querySelector("#lkResult")?.innerText.slice(0,160)');
+
+  // 补充记录的来源标记（本机加的 → 应显示「我补充的」）
+  await check('补充记录来源标记',
+    'document.querySelector("#notesBoxGroups .note-badge.mine, #notesBoxGroups .note-badge.other")?.textContent || "无"');
+
   await send('Page.captureScreenshot', { format: 'png' }).then(r => {
     if (r.result && r.result.data) {
       fs.writeFileSync(path.join(OUT, 'ui_shot_1.png'), Buffer.from(r.result.data, 'base64'));

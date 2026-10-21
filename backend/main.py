@@ -631,7 +631,7 @@ async def reverse_lookup_posts(
     user_id: str,
     gids: str = Query("", alias="groups",
                       description="候选小组 id，逗号分隔，如 146409,736218（最多 8 个）"),
-    pages: int = Query(2, ge=1, le=5, description="每个小组扫描页数，每页 50 条话题"),
+    pages: int = Query(4, ge=1, le=20, description="每个小组扫描页数，每页 50 条话题"),
 ):
     """【反查他人发言】扫描指定小组的公开话题，过滤出该用户的发帖
 
@@ -647,17 +647,33 @@ async def reverse_lookup_posts(
                     message="请通过 groups 参数提供候选小组 id（逗号分隔），"
                             "可先用 /api/search/group?q=关键词 搜索小组")
     try:
-        topics = await _c().scan_author_posts_in_groups(user_id, group_ids, pages)
+        res = await _c().scan_author_posts_in_groups(user_id, group_ids, pages)
     except DoubanError as e:
         raise _err(e)
-    return Resp(ok=True, source="douban", data={
+    topics = res["topics"]
+    failed = res.get("failed") or []
+    covered_from = res.get("covered_from") or ""
+    payload = {
         "topics": topics,
         "total": len(topics),
         "scanned_groups": group_ids,
         "pages_per_group": pages,
-        "note": f"已扫描 {len(group_ids)} 个小组 × 每組最多 {pages * 50} 条话题，"
-                f"命中的是 TA 在这批小组里的近期发帖（非全量历史）",
-    })
+        "topics_scanned": res.get("topics_scanned", 0),
+        "covered_from": covered_from,
+        "note": f"已扫 {res.get('topics_scanned', 0)} 条话题"
+                + (f"，最早覆盖到 {covered_from}" if covered_from else "")
+                + "。热门小组帖子刷新很快，更早的发帖请用「全量扫描」。",
+    }
+    if failed:
+        need_login = any(f.get("need_login") for f in failed)
+        payload["failed_groups"] = failed
+        payload["scan_incomplete"] = True
+        payload["warning"] = (
+            ("豆瓣要求登录后才能扫描这批小组：" if need_login else "")
+            + f"{len(failed)}/{len(group_ids)} 个小组没扫完（{failed[0]['msg'][:60]}）。"
+            + "下面的 0 条不代表 TA 没发过帖，可能是扫描被中断了，请稍后重试或换个小组。"
+        )
+    return Resp(ok=True, source="douban", data=payload)
 
 
 # --------------------------------------------------------------------
@@ -968,20 +984,14 @@ async def get_group_topics(group_id: str, start: int = 0, count: int = Query(20,
 # --------------------------------------------------------------------
 # 手动补充记录（notes）
 # --------------------------------------------------------------------
-def _note_scope() -> Optional[str]:
-    """当前请求对应的笔记分区。
+def _note_scope() -> str:
+    """补充记录的分区。
 
-    共享 / 公网模式下，若访问者没带凭证，就无法区分"这是谁的笔记"，
-    返回 None → 前端改为只存在他自己的浏览器 localStorage 里。
+    默认固定为 "global"：**连到同一个后端的所有人共享同一份补充记录**。
+    这样你补充的内容，别人查同一个 uid 时也能看到（查人时别人的线索同样有用）。
+    每条记录带 by 字段标记来源（匿名本机标识），只用来显示"我 / 别人"。
     """
-    if PUBLIC_MODE or CLOUD_MODE:
-        c = _c()
-        if not (c.token or c.cookie):
-            return None
-        # 共享部署：按访问者凭证指纹分区，各人的私人备注互不可见
-        return notes.scope_id(c.token, c.cookie)
-    # 本机个人使用：固定分区，换 token / 重新登录都不会丢
-    return "local"
+    return "global"
 
 
 class NoteIn(BaseModel):
@@ -991,6 +1001,7 @@ class NoteIn(BaseModel):
     text: Optional[str] = None
     image: Optional[str] = None           # data:image/...;base64,...
     tags: Optional[list[str] | str] = None
+    by: Optional[str] = None                  # 补充者的匿名本机标识（区分「我 / 他人」）
     user_name: Optional[str] = None
     topic_id: Optional[str] = None
     group_id: Optional[str] = None
@@ -1000,22 +1011,14 @@ class NoteIn(BaseModel):
 @app.get("/api/notes/{user_id}", response_model=Resp)
 async def get_notes(user_id: str = Path(...)):
     """取某个 uid 的手动补充记录"""
-    sc = _note_scope()
-    if sc is None:
-        return Resp(ok=False, source="local_only", data={"items": [], "total": 0},
-                    message="共享模式下服务端不保存补充记录，请改用浏览器本地存储")
-    return Resp(ok=True, source="local", data=notes.list_notes(sc, user_id))
+    return Resp(ok=True, source="local", data=notes.list_notes(_note_scope(), user_id))
 
 
 @app.post("/api/notes/{user_id}", response_model=Resp)
 async def create_note(body: NoteIn, user_id: str = Path(...)):
     """新增一条补充记录（同一个帖子网址会合并更新，不重复添加）"""
-    sc = _note_scope()
-    if sc is None:
-        return Resp(ok=False, source="local_only", data=None,
-                    message="共享模式下服务端不保存补充记录，请改用浏览器本地存储")
     try:
-        data = notes.add_note(sc, user_id, body.model_dump(), body.user_name or "")
+        data = notes.add_note(_note_scope(), user_id, body.model_dump(), body.user_name or "")
     except Exception as e:  # noqa: BLE001
         return Resp(ok=False, source="local", data=None, message=f"保存失败：{e}")
     return Resp(ok=True, source="local", data=data,
@@ -1025,43 +1028,28 @@ async def create_note(body: NoteIn, user_id: str = Path(...)):
 @app.delete("/api/notes/{user_id}/{item_id}", response_model=Resp)
 async def remove_note(user_id: str = Path(...), item_id: str = Path(...)):
     """删除一条补充记录"""
-    sc = _note_scope()
-    if sc is None:
-        return Resp(ok=False, source="local_only", data=None,
-                    message="共享模式下服务端不保存补充记录，请改用浏览器本地存储")
-    return Resp(ok=True, source="local", data=notes.delete_note(sc, user_id, item_id))
+    return Resp(ok=True, source="local",
+                data=notes.delete_note(_note_scope(), user_id, item_id))
 
 
 @app.post("/api/notes/{user_id}/pin", response_model=Resp)
 async def pin_note(body: dict, user_id: str = Path(...)):
     """置顶 / 取消置顶一条补充记录"""
-    sc = _note_scope()
-    if sc is None:
-        return Resp(ok=False, source="local_only", data=None,
-                    message="共享模式下服务端不保存补充记录，请改用浏览器本地存储")
     item_id = str(body.get("item_id") or "")
-    return Resp(ok=True, source="local", data=notes.toggle_pin(sc, user_id, item_id))
+    return Resp(ok=True, source="local", data=notes.toggle_pin(_note_scope(), user_id, item_id))
 
 
 @app.get("/api/notes/export/all", response_model=Resp)
 async def export_notes():
     """导出全部补充记录（备份 / 换设备用）"""
-    sc = _note_scope()
-    if sc is None:
-        return Resp(ok=False, source="local_only", data=None,
-                    message="共享模式下服务端不保存补充记录")
-    return Resp(ok=True, source="local", data=notes.export_all(sc))
+    return Resp(ok=True, source="local", data=notes.export_all(_note_scope()))
 
 
 @app.post("/api/notes/import/all", response_model=Resp)
 async def import_notes(payload: dict):
     """导入备份（覆盖当前分区）"""
-    sc = _note_scope()
-    if sc is None:
-        return Resp(ok=False, source="local_only", data=None,
-                    message="共享模式下服务端不保存补充记录")
     try:
-        out = notes.import_all(sc, payload or {})
+        out = notes.import_all(_note_scope(), payload or {})
     except ValueError as e:
         return Resp(ok=False, source="local", data=None, message=str(e))
     return Resp(ok=True, source="local", data=out, message="导入完成")

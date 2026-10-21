@@ -64,7 +64,10 @@ DOUBAN_COOKIE = os.getenv("DOUBAN_COOKIE", "").strip()
 CACHE_TTL = int(os.getenv("DOUBAN_CACHE_TTL", "600"))  # 缓存秒数，默认 10 分钟
 SCAN_TOPICS_LIMIT = int(os.getenv("DOUBAN_SCAN_GROUPS", "8"))  # 扫描发言记录时最多遍历的小组数
 MAX_SCAN_GROUPS = int(os.getenv("DOUBAN_SCAN_GROUPS", "8"))     # 反查发言：单次最多扫描的小组数
-MAX_SCAN_PAGES = int(os.getenv("DOUBAN_SCAN_PAGES", "5"))       # 反查发言：每个小组最多扫描页数（每页50条）
+# 反查发言：每个小组最多扫描页数（每页50条）。
+# 活跃小组几分钟就能刷出几十条新帖，窗口太窄会导致"明明发过却查不到"，
+# 实测每页约 2 秒，20 页（1000 条）也就 40 秒左右，可以放开。
+MAX_SCAN_PAGES = int(os.getenv("DOUBAN_SCAN_PAGES", "20"))
 
 
 class DoubanError(Exception):
@@ -669,8 +672,12 @@ class DoubanClient:
         group_ids = [str(g).strip() for g in group_ids if str(g).strip()][:MAX_SCAN_GROUPS]
         pages = max(1, min(int(pages), MAX_SCAN_PAGES))
 
+        failed: list[dict] = []   # 扫描没跑完的小组（含原因），不能再静默吞掉
+
         async def scan_one(gid: str):
             out: list[dict] = []
+            oldest = ""          # 本组扫到的最早话题时间 → 告诉用户覆盖到什么时候
+            scanned = 0
             gname = gid
             # 话题接口不返回所在小组名，单独取一次小组详情（最多 8 个，开销可接受）
             try:
@@ -681,9 +688,29 @@ class DoubanClient:
             for p in range(pages):
                 try:
                     res = await self.get_group_topics(gid, start=p * 50, count=50)
-                except DoubanError:
+                except DoubanError as e:
+                    # 关键：以前这里直接 break，扫描失败和「真没发帖」都显示成 0 条，
+                    # 用户完全没法区分。现在把原因带出去。
+                    failed.append({
+                        "group_id": gid,
+                        "group_name": gname,
+                        "page": p,
+                        "code": e.code,
+                        "msg": e.msg,
+                        "need_login": bool(getattr(e, "need_login", False)),
+                    })
                     break
+                except Exception as e:      # 网络抖动等
+                    failed.append({
+                        "group_id": gid, "group_name": gname, "page": p, "code": -1,
+                        "msg": f"{type(e).__name__}: {e}", "need_login": False,
+                    })
+                    break
+                scanned += len(res.get("topics", []))
                 for t in res.get("topics", []):
+                    ct = t.get("create_time") or ""
+                    if ct and (not oldest or ct < oldest):
+                        oldest = ct
                     a = t.get("author") or {}
                     if str(a.get("id")) == str(user_id):
                         out.append({
@@ -699,15 +726,23 @@ class DoubanClient:
                         })
                 if len(res.get("topics", [])) < 50:
                     break
-            return out
+            return {"out": out, "oldest": oldest, "scanned": scanned}
 
         results = await asyncio.gather(*(scan_one(g) for g in group_ids),
                                        return_exceptions=True)
         topics: list[dict] = []
-        for r in results:
+        oldest_all, scanned_all = "", 0
+        for gid, r in zip(group_ids, results):
             if isinstance(r, Exception):
+                failed.append({
+                    "group_id": gid, "group_name": gid, "page": 0, "code": -1,
+                    "msg": f"{type(r).__name__}: {r}", "need_login": False,
+                })
                 continue
-            topics.extend(r)
+            topics.extend(r["out"])
+            scanned_all += r["scanned"]
+            if r["oldest"] and (not oldest_all or r["oldest"] < oldest_all):
+                oldest_all = r["oldest"]
         # 去重（同一话题可能出现在多处）
         seen = set()
         uniq = []
@@ -717,7 +752,8 @@ class DoubanClient:
             seen.add(t["topic_id"])
             uniq.append(t)
         uniq.sort(key=lambda x: x.get("create_time") or "", reverse=True)
-        return uniq
+        return {"topics": uniq, "failed": failed,
+                "topics_scanned": scanned_all, "covered_from": oldest_all}
 
 
 # ---------------- 配置持久化（支持网页端热更新 token，无需重启） ----------------

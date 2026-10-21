@@ -9,13 +9,13 @@
       这些东西豆瓣 API 给不了，但对"判断这个人靠不靠谱"恰恰最有用。
       所以提供「补充记录」：按 uid 记下来，下次再查同一个 uid 时自动一起展示。
 
-存储与隔离：
-  * 数据落在 backend/data/notes.json，按「scope」分区：
-      - 本机模式（自己一个人用）                → scope = "local"
-      - 云端 / 公网共享模式且访问者带了凭证     → scope = "u_<凭证指纹>"
-        这样多人共用一个后端时，各人的补充记录互不串、互相看不到。
-  * 共享模式下若访问者没登录（无法区分是谁），后端拒绝写入，
-    前端自动回落为「只存你自己浏览器 localStorage」。
+存储与共享：
+  * 数据落在 backend/data/notes.json，**同一个后端上的所有人共享同一份**：
+    你补充的记录，别人查同一个 uid 时也能看到；反之亦然。
+    （这是有意的：查"这个人靠不靠谱"时，别人提供的线索同样有价值。）
+  * 每条记录带 `by` 字段（前端生成的匿名本机标识，如 "A3F2"），
+    只用来区分"这条是我加的还是别人加的"，不含任何账号信息。
+  * scope 分区保留（默认 "global"），把后端部署成多租户时才用得上。
 """
 from __future__ import annotations
 
@@ -160,6 +160,8 @@ def _clean_item(raw: dict) -> dict:
                       or time.strftime("%Y-%m-%d %H:%M:%S"),
         "pinned": bool(raw.get("pinned")),
         "source": str(raw.get("source") or "manual").strip()[:20] or "manual",
+        # 谁补的（前端生成的匿名本机标识，仅用于区分「我 / 别人」）
+        "by": re.sub(r"[^\w\-]", "", str(raw.get("by") or "").strip())[:24],
     }
 
 

@@ -456,6 +456,8 @@
     border-radius: 5px; padding: 2px 6px; }
   .note-badge.kind { background: #eef1f4; color: #667; font-weight: 500; }
   .note-badge.pin { background: #ffe9a8; color: #8a5a00; }
+  .note-badge.mine { background: #d9f2e0; color: #1c6b3a; }
+  .note-badge.other { background: #eaf0fb; color: #2b4c8c; }
   .note-time { font-size: 11px; color: #b09a5f; margin-left: auto; }
   .note-title { font-size: 14px; font-weight: 600; line-height: 1.5; color: #3a3220;
     word-break: break-word; }
@@ -2021,6 +2023,16 @@ const NOTE_LS_PREFIX = 'douban_notes_';
 
 function noteLsKey(uid) { return NOTE_LS_PREFIX + uid; }
 
+/* 本机匿名标识：只用来在共享记录里区分「这条是我加的还是别人加的」，不含任何账号信息 */
+function noteMyTag() {
+  let t = lsGet('douban_note_tag');
+  if (!t) {
+    t = Math.random().toString(16).slice(2, 6).toUpperCase();
+    lsSet('douban_note_tag', t);
+  }
+  return t;
+}
+
 function noteLocalLoad(uid) {
   try { return JSON.parse(lsGet(noteLsKey(uid)) || '[]') || []; } catch (e) { return []; }
 }
@@ -2095,6 +2107,7 @@ function noteUpsertLocal(uid, payload) {
     id: 'n' + Date.now().toString(36) + Math.random().toString(36).slice(2, 6),
     kind: 'text', url: '', topic_id: tid || '', group_id: '', group_name: '',
     title: '', text: '', image: '', created_at: nowStr(), pinned: false,
+    by: noteMyTag(),
   }, payload, { tags: toTags(payload.tags || []) }));
   noteLocalSave(uid, items);
   return items;
@@ -2102,6 +2115,7 @@ function noteUpsertLocal(uid, payload) {
 
 async function persistNote(payload) {
   const uid = notesCtx.uid;
+  payload.by = payload.by || noteMyTag();
   if (notesCtx.mode === 'server') {
     const r = await fetch(API + '/api/notes/' + encodeURIComponent(uid), {
       method: 'POST',
@@ -2165,11 +2179,16 @@ function noteCardHtml(n) {
   const img = n.image
     ? `<img class="note-img" src="${esc(n.image)}" alt="截图" onclick="viewImg(this.src)">`
     : '';
+  const mine = n.by && n.by === noteMyTag();
+  const byTip = n.by
+    ? `<span class="note-badge ${mine ? 'mine' : 'other'}">${mine ? '我补充的' : '他人补充 ' + esc(n.by)}</span>`
+    : '';
   return `
     <div class="note-item ${n.pinned ? 'pinned' : ''}">
       <div class="note-head">
         <span class="note-badge">手动补充</span>
         <span class="note-badge kind">${NOTE_KIND_LABEL[n.kind] || '✍️ 手写'}</span>
+        ${byTip}
         ${n.pinned ? '<span class="note-badge pin">📌 置顶</span>' : ''}
         <span class="note-time">${esc(n.created_at || '')}</span>
       </div>
@@ -2187,8 +2206,10 @@ function noteCardHtml(n) {
 
 function notesHtml() {
   const items = notesCtx.items || [];
-  let h = `<div class="note-sec-title">📌 我补充的记录
-      <span class="cnt">${items.length} 条 · 只有你自己能看到</span></div>`;
+  const mine = items.filter(n => n.by && n.by === noteMyTag()).length;
+  const others = items.length - mine;
+  let h = `<div class="note-sec-title">📌 补充记录
+      <span class="cnt">${items.length} 条${items.length ? `（我 ${mine} · 他人 ${others}）` : ''}</span></div>`;
   if (!items.length) {
     h += `<div class="note-item"><div class="note-text" style="color:#8a7c55">
         还没有补充记录。豆瓣接口查不到的内容（帖子网址、聊天截图、你私下知道的线索）
@@ -2203,8 +2224,9 @@ function notesHtml() {
       <div class="note-btn" onclick="importNotes()">⬆️ 导入</div>
     </div>
     <div class="note-mode-tip">${notesCtx.mode === 'local'
-      ? '💾 存在你自己浏览器里（换设备 / 清缓存会丢，建议偶尔导出备份）'
-      : '💾 存在本机 backend/data/notes.json（换浏览器也还在）'}</div>`;
+      ? '💾 后端没连上，暂存在你自己浏览器里（换设备 / 清缓存会丢，建议导出备份）'
+      : '💾 存在后端 backend/data/notes.json —— 连同一个后端的其他人查这个 ID 也能看到这些补充，' +
+        '反之你也会看到别人补的线索。每条都标了「我补充的 / 他人补充」'}</div>`;
   return h;
 }
 
@@ -2519,7 +2541,7 @@ function lookupPanelHtml() {
         </div>
         <div>
           <label>扫描页数</label>
-          <input id="lkPages" type="number" min="1" max="5" value="2">
+          <input id="lkPages" type="number" min="1" max="20" value="4">
         </div>
       </div>
       <div class="lp-hint" id="lkLoginWarn"
@@ -2542,6 +2564,8 @@ function lookupPanelHtml() {
       <div id="lkResult"></div>
       <div class="lp-hint">
         说明：只能覆盖各小组的「最近内容」（每页 50 条 × 扫描页数），不是全量历史。
+        <b>热门小组发帖很快</b>：默认 4 页 ≈ 最近 200 条，若 TA 发得较早请把页数调大（最多 20 页 ≈ 1000 条），
+        结果里会告诉你这次最早覆盖到什么时间。<br>
         <b>回帖</b>模式会扫话题评论区 —— 豆瓣现在要求登录后才能读评论，
         所以回帖反查必须先登录（登录后基本不会再遇到「反爬」提示）。
       </div>
@@ -2587,7 +2611,7 @@ function pickGroup(gid) {
 async function doReverseLookup() {
   const box = $('lkResult');
   const groups = ($('lkGroups').value || '').replace(/[，、\s]+/g, ',').split(',').filter(Boolean);
-  const pages = Math.min(5, Math.max(1, parseInt($('lkPages').value || '2', 10)));
+  const pages = Math.min(20, Math.max(1, parseInt($('lkPages').value || '4', 10)));
   if (!groups.length) {
     box.innerHTML = '<div class="info-banner">请先填写候选小组 ID（可点下方按钮搜索）</div>';
     return;
@@ -2639,8 +2663,11 @@ async function doReverseLookup() {
         <div class="ib-title">⚠️ 部分小组被限流</div>${esc(d.warning)}</div>`;
     }
     if (!items.length) {
-      html += '<div class="empty">这批小组里没有找到 TA 的近期回帖<br>' +
-              '<small>可增加候选小组 / 提高扫描页数后重试</small></div>';
+      html += d.warning
+        ? '<div class="empty">这次一条都没扫到，但扫描被中断了 —— <b>不能据此判断 TA 没回过帖</b><br>' +
+          '<small>请按上面的提示重试</small></div>'
+        : '<div class="empty">这批小组里没有找到 TA 的近期回帖<br>' +
+          '<small>可增加候选小组 / 提高扫描页数后重试</small></div>';
     } else {
       html += `<div class="list-header">命中 ${items.length} 条回帖</div>`;
       html += items.map(c => `
@@ -2658,9 +2685,22 @@ async function doReverseLookup() {
   } else {
     const items = d.topics || [];
     let html = '<div class="info-banner"><div class="ib-title">发帖反查完成</div>' + esc(d.note || '') + '</div>';
+    if (d.warning) {
+      // 扫描被中断（风控 / 需登录 / 网络）时，0 条 ≠ 没发过帖，必须说清楚
+      const needLogin = (d.failed_groups || []).some(f => f.need_login);
+      html += `<div class="info-banner" style="background:#fff4e6;color:#c2410c">
+        <div class="ib-title">⚠️ 扫描没跑完，结果不可信</div>${esc(d.warning)}
+        ${needLogin ? '<div style="margin-top:8px"><span class="relink" onclick="openTokenModal()">点此登录 →</span></div>' : ''}
+        <div style="margin-top:6px;font-size:12px">
+          建议：稍等一两分钟再点一次「开始反查」，或先只填 1 个小组、页数调小试试。</div>
+      </div>`;
+    }
     if (!items.length) {
-      html += '<div class="empty">这批小组里没有找到 TA 的近期发帖<br>' +
-              '<small>可增加候选小组或提高扫描页数</small></div>';
+      html += d.warning
+        ? '<div class="empty">这次一条都没扫到，但扫描被中断了 —— <b>不能据此判断 TA 没发过帖</b><br>' +
+          '<small>请按上面的提示重试</small></div>'
+        : '<div class="empty">这批小组里没有找到 TA 的近期发帖<br>' +
+          '<small>可增加候选小组或提高扫描页数（默认只覆盖最近 100 条话题）</small></div>';
     } else {
       html += `<div class="list-header">命中 ${items.length} 条发帖</div>`;
       html += items.map(t => `

@@ -533,9 +533,8 @@
       <div class="share-warn" id="shareCloudTip" style="display:none;background:#eef7ff;border-color:#b6dcfb;color:#1a5c8a"></div>
 
       <div class="share-warn" id="shareWarn" style="display:none">
-        ⚠️ <b>你现在是登录状态</b>（uid <span id="shareUid"></span>）。<br>
-        别人访问这台机器上的工具时，看到的「我加入的小组 / 我的发言」就是<b>你的账号数据</b>。
-        如果不想暴露，先点下面的「退出登录」再分享；退出后公开功能（查他人、反查、小组搜索）照常可用。
+        <span id="shareWarnText"></span>
+        <span id="shareUid" style="display:none"></span>
       </div>
       <button class="ghost" id="logoutBtn" onclick="doLogout()" style="display:none">退出登录（清除本机凭证）</button>
 
@@ -608,6 +607,11 @@
       <div class="login-prompt">
         <h3>登录豆瓣 · 解锁完整功能</h3>
         <p class="lp-hint">登录后才能看自己加入的小组和完整发言。公开功能不需要登录。</p>
+        <div class="lp-hint" id="lpShareTip" style="display:none;background:#fff7e6;border:1px solid #ffd591;color:#8a5a00;border-radius:8px;padding:10px 12px;margin:0 0 12px">
+          <b>请用你自己的豆瓣账号登录。</b><br>
+          登录凭证只保存在<b>你这个浏览器</b>里：别人看不到你的账号，你也看不到别人的。
+          换设备 / 换浏览器需要重新登录一次。
+        </div>
 
         <div class="lp-section">
           <span class="lp-tag recommend">推荐</span>
@@ -1149,18 +1153,25 @@ async function refreshLoginState() {
     return h;
   }
   const st = h.token_status;
+  const needLogin = !!h.need_login;
+  const tip = $('lpShareTip');
+  if (tip) tip.style.display = needLogin ? 'block' : 'none';
   if (st === 'valid') {
     setFab('ok', (h.self_uid ? 'uid ' + h.self_uid : '已登录'));
     $('loginPrompt').style.display = 'none';
+    // 记住「这个浏览器」登录过的 uid，仅用于本浏览器下次预填
+    if (h.self_uid) lsSet('douban_self_uid', h.self_uid);
   } else {
     if (st === 'expired') setFab('warn', '登录失效 · 点此更新');
-    else if (st === 'invalid') setFab('warn', 'token 无效 · 点此更新');
-    else setFab('missing', '未登录');
+    else if (st === 'invalid') setFab('warn', '凭证无效 · 点此更新');
+    else setFab('missing', needLogin ? '未登录 · 点此登录' : '未登录');
     $('loginPrompt').style.display = 'block';
-    // 默认把上次保存的 uid 预填
+    // 只预填「这个浏览器自己」上次登录过的 uid，绝不使用服务端账号
     const uidInput = $('lpCookieUid');
-    if (uidInput && !uidInput.value && h.self_uid) uidInput.value = h.self_uid;
+    const savedUid = lsGet('douban_self_uid');
+    if (uidInput && !uidInput.value && savedUid) uidInput.value = savedUid;
   }
+  syncBookmarkUrl();
   return h;
 }
 
@@ -1304,6 +1315,15 @@ function setFab(state, text) {
   $('loginFabText').textContent = text;
 }
 
+/* 小书签里的后端地址改成当前实际地址（别人通过公网域名访问时也能用） */
+function syncBookmarkUrl() {
+  const a = $('bkLink');
+  if (!a || !API) return;
+  let href = a.getAttribute('href') || '';
+  if (href.indexOf('127.0.0.1:8000') < 0) return;   // 已替换过
+  a.setAttribute('href', href.replace(/http:\/\/127\.0\.0\.1:8000/g, API));
+}
+
 /* 点击小书签按钮时不要跳转（那样只会执行在本页、读不到豆瓣 Cookie），
    而是把代码复制出来，提示拖到书签栏 / 手动新建书签 */
 function copyBookmark(ev) {
@@ -1350,9 +1370,30 @@ async function openShareModal() {
     $('shareQr').innerHTML =
       '<img src="' + API + '/api/qrcode.svg?scale=6&text=' + encodeURIComponent(url) +
       '" alt="访问地址二维码" style="width:178px;height:178px">';
-    if (j.credential_configured) {
+    const shared = !!j.need_login;
+    if (shared) {
+      // 共享模式：别人打开后必须登录自己的账号，不会看到你的数据
       $('shareWarn').style.display = 'block';
+      $('shareWarn').className = 'share-warn';
+      $('shareWarn').style.background = '#eef7ff';
+      $('shareWarn').style.borderColor = '#b6dcfb';
+      $('shareWarn').style.color = '#1a5c8a';
+      $('shareUid').textContent = '';
+      $('shareWarnText').innerHTML =
+        '🔒 <b>放心分享</b>：别人打开后需要<b>登录他自己的豆瓣账号</b>才能用，' +
+        '看不到你的账号和你的数据。你自己的凭证只存在你正在用的这个浏览器里。';
+      $('logoutBtn').style.display = 'block';
+    } else if (j.credential_configured) {
+      $('shareWarn').style.display = 'block';
+      $('shareWarn').className = 'share-warn';
+      $('shareWarn').style.background = '';
+      $('shareWarn').style.borderColor = '';
+      $('shareWarn').style.color = '';
       $('shareUid').textContent = j.self_uid || (selfAccount && selfAccount.uid) || '本人';
+      $('shareWarnText').innerHTML =
+        '⚠️ <b>你现在是登录状态</b>（uid <span id="shareUid"></span>）。' +
+        '同一台电脑 / 受信任的设备访问时会直接用这个账号；' +
+        '如果不想暴露，先点下面的「退出登录」再分享。';
       $('logoutBtn').style.display = 'block';
     } else {
       $('shareWarn').style.display = 'none';

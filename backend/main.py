@@ -64,12 +64,34 @@ app.add_middleware(
 )
 
 
+def _visitor_must_login(request) -> bool:
+    """外部访问者是否必须用自己的凭证登录（避免把服务端保存的账号暴露给别人）
+
+    - 云端模式（DOUBAN_CLOUD=1）：永远是，凭证只存访问者浏览器。
+    - 本机模式：只有从 127.0.0.1 / ::1 访问才沿用服务端保存的凭证；
+      其他人（含局域网）必须自己登录，看不到服务端账号。
+    - 想让局域网设备也免登录，设置 DOUBAN_TRUST_LAN=1。
+    """
+    if CLOUD_MODE:
+        return True
+    host = (request.client.host if request.client else "") or ""
+    if host in ("127.0.0.1", "::1", "localhost", "::ffff:127.0.0.1"):
+        return False
+    if os.getenv("DOUBAN_TRUST_LAN", "").strip().lower() in ("1", "true", "yes"):
+        if host.startswith(("192.168.", "10.", "172.")):
+            return False
+    return True
+
+
 @app.middleware("http")
 async def _credential_middleware(request, call_next):
-    """把请求头里的凭证绑定到本次请求（云端多用户隔离）"""
+    """把请求头里的凭证绑定到本次请求（多用户隔离）"""
     tok = request.headers.get("X-Douban-Token") or ""
     ck = request.headers.get("X-Douban-Cookie") or ""
-    _active_client.set(client.scoped(tok, ck) if (tok or ck) else client)
+    if (tok or ck) or _visitor_must_login(request):
+        _active_client.set(client.scoped(tok, ck))
+    else:
+        _active_client.set(client)
     return await call_next(request)
 
 # Web 网页版：直接访问 http://<host>:8000/ 即可使用
@@ -108,11 +130,13 @@ async def _self_uid() -> Optional[str]:
 
 # --------------------------------------------------------------------
 @app.get("/api/health")
-async def health():
+async def health(request: Request):
     """服务状态 + 登录凭证有效性（前端据此显示「登录有效 / 登录失效」）
 
-    云端模式下，凭证来自请求头（访问者自己的浏览器），因此每个人看到的是自己的登录态。
+    共享模式下，凭证来自请求头（访问者自己的浏览器），每个人看到的是自己的登录态，
+    不会返回服务端保存的账号。
     """
+    need_login = _visitor_must_login(request)
     if not _c().token and not _c().cookie:
         status, detail = "missing", "未登录：只能查公开数据（用户信息、小组搜索、反查发帖/回帖）"
     else:
@@ -140,7 +164,10 @@ async def health():
         "detail": detail,
         "cooldown": client.cooldown_info(),   # 风控冷却状态（1000 反爬后自动进入）
         "cloud_mode": CLOUD_MODE,        # 云端部署：凭证只存访问者浏览器
-        "mode": ("云端共享模式（凭证存你自己浏览器）" if CLOUD_MODE else "本机模式")
+        "need_login": need_login,        # true：必须用你自己的豆瓣账号登录
+        "mode": ("共享模式：请用你自己的豆瓣账号登录（不会显示他人账号）"
+                 if need_login and status != "valid" else
+                 ("云端共享模式（凭证存你自己浏览器）" if CLOUD_MODE else "本机模式"))
                 if status != "valid" else
                 "真实数据（本人可查小组/发言）",
     }
@@ -211,7 +238,9 @@ async def share_info(request: Request):
         "cloud_mode": CLOUD_MODE,
         # 已配置登录凭证时，别人访问会共享你的账号数据 → 前端据此提醒
         "credential_configured": bool(client.token or client.cookie),
-        "self_uid": os.getenv("DOUBAN_SELF_UID", ""),
+        "need_login": _visitor_must_login(request),
+        # 共享模式下不把服务端账号 uid 发给外部访问者
+        "self_uid": "" if _visitor_must_login(request) else os.getenv("DOUBAN_SELF_UID", ""),
     }
 
 
@@ -262,7 +291,8 @@ class TokenIn(BaseModel):
     self_uid: Optional[str] = None   # Cookie 登录时需要（如 281065007）
 
 
-async def _apply_credential(token: str, cookie: str, self_uid: str = "") -> dict:
+async def _apply_credential(token: str, cookie: str, self_uid: str = "",
+                            readonly: bool = False) -> dict:
     """校验登录凭证（token 或 cookie 二选一，token 优先）
 
     本机模式：校验通过写盘（douban_config.json）并立即生效；
@@ -294,8 +324,9 @@ async def _apply_credential(token: str, cookie: str, self_uid: str = "") -> dict
     detail = f"登录成功（{'token' if chk.get('via') == 'token' else 'Cookie'}）：" \
              f"{chk.get('name') or ''}（uid {chk.get('uid')}）{extra}"
 
-    if CLOUD_MODE:
+    if CLOUD_MODE or readonly:
         # 不落盘：告诉前端自己存 localStorage
+        # readonly：外部访问者共享这台后端时，绝不能覆盖服务端保存的账号
         return {"ok": True, "status": "valid", "uid": chk.get("uid"),
                 "name": chk.get("name"), "via": chk.get("via"),
                 "saved": False, "cloud": True, "detail": detail}
@@ -310,19 +341,23 @@ async def _apply_credential(token: str, cookie: str, self_uid: str = "") -> dict
 
 
 @app.post("/api/config/token")
-async def set_token(body: TokenIn):
-    """热更新登录凭证（写入 douban_config.json，立即生效，无需重启后端）
+async def set_token(body: TokenIn, request: Request):
+    """热更新登录凭证（本机模式写入 douban_config.json，立即生效，无需重启后端）
+
+    共享模式下（外部访问者 / DOUBAN_CLOUD=1）只校验不写盘，
+    凭证由访问者自己的浏览器保存，不会覆盖服务端账号。
 
     两种凭证二选一（都给也行，token 优先）：
       body: {"token": "xxx"}
       body: {"cookie": "dbcl2=\\"uid:xxx\\"", "self_uid": "281065007"}
     返回: {"ok": true, "status": "valid"/"expired"/"invalid", "uid", "name", "via", "detail"}
     """
-    return await _apply_credential(body.token, body.cookie, body.self_uid)
+    return await _apply_credential(body.token, body.cookie, body.self_uid,
+                                   readonly=_visitor_must_login(request))
 
 
 @app.get("/api/cookie-login", response_class=HTMLResponse)
-async def cookie_login(cookie: str = Query(""), uid: str = Query("")):
+async def cookie_login(request: Request, cookie: str = Query(""), uid: str = Query("")):
     """小书签兜底通道：豆瓣页面的 CSP 可能拦掉 fetch，改用新窗口导航带出 Cookie。
 
     用法（新窗口打开）：/api/cookie-login?cookie=dbcl2%3D%22uid%3Axxx%22&uid=281065007
@@ -330,7 +365,13 @@ async def cookie_login(cookie: str = Query(""), uid: str = Query("")):
     """
     if not cookie:
         return _login_result_html(False, "没有收到 cookie 参数")
-    r = await _apply_credential("", cookie, uid)
+    r = await _apply_credential("", cookie, uid,
+                                readonly=_visitor_must_login(request))
+    if r.get("cloud"):
+        return _login_result_html(
+            r["ok"],
+            (r.get("detail", "") or "") +
+            "（共享模式：凭证没有存在服务器上，请在查询页面里粘贴这个 Cookie 完成登录）")
     return _login_result_html(r["ok"], r.get("detail", ""))
 
 

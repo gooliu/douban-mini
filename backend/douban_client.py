@@ -126,6 +126,10 @@ class DoubanClient:
         view = copy.copy(self)
         view.token = (token or "").strip()
         view.cookie = self._normalize_cookie(cookie) if cookie else ""
+        # 标记为「访问者自己的凭证」：不得回落到服务端保存的账号（环境变量 / 配置文件）
+        view._visitor = True
+        view._self_uid = None          # 别继承服务端账号的 uid 缓存
+        view._self_uid_ts = 0.0
         return view
 
     def set_token(self, token: str) -> None:
@@ -407,9 +411,10 @@ class DoubanClient:
           1. 环境变量 DOUBAN_SELF_UID 指定（优先）
           2. 调 posted_topics 取首条话题的作者 id 推断
         注意：不能用 /api/v2/user/me —— 它返回的是占位账号（uid="me"）。
+        访问者凭证（scoped）不会回落到服务端保存的 uid，避免串号。
         """
         env = os.getenv("DOUBAN_SELF_UID", "").strip()
-        if env:
+        if env and not getattr(self, "_visitor", False):
             return env
         if not self.token:
             return None

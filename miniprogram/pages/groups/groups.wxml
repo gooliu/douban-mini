@@ -1,0 +1,46 @@
+<view class="page">
+  <!-- 用户卡片 -->
+  <view class="user-card" wx:if="{{user}}">
+    <image class="avatar" src="{{user.avatar}}" mode="aspectFill" />
+    <view class="info">
+      <view class="name">{{user.name}}</view>
+      <view class="meta">{{user.loc || '未知地区'}} · 粉丝 {{user.followers_count || 0}}</view>
+    </view>
+    <view class="go-posts" bindtap="goPosts">发言记录 →</view>
+  </view>
+
+  <!-- 演示数据提示 -->
+  <view class="mock-banner" wx:if="{{source === 'mock'}}">
+    <view class="dot"></view>
+    <text>{{message || '当前为演示数据，配置 DOUBAN_TOKEN 后为真实数据'}}</text>
+  </view>
+
+  <!-- 加载中 -->
+  <view class="empty" wx:if="{{loading}}">加载中…</view>
+  <view class="empty" wx:elif="{{error}}">{{error}}</view>
+  <view class="empty" wx:elif="{{!groups.length}}">没有找到加入的小组</view>
+
+  <!-- 小组列表 -->
+  <view class="group-list" wx:else>
+    <view class="list-header">加入的小组（{{total}}）</view>
+    <view
+      class="group-item"
+      wx:for="{{groups}}"
+      wx:key="id"
+      data-group="{{item}}"
+      bindtap="goGroupTopics"
+    >
+      <view class="g-icon">{{item.name[0]}}</view>
+      <view class="g-body">
+        <view class="g-name">{{item.name}}</view>
+        <view class="g-desc">{{item.desc}}</view>
+        <view class="g-meta">
+          <text wx:if="{{item.category}}" class="g-tag">{{item.category}}</text>
+          <text>{{item.member_count}} 成员</text>
+          <text> · 创建于 {{item.create_time}}</text>
+        </view>
+      </view>
+      <view class="g-arrow">›</view>
+    </view>
+  </view>
+</view>

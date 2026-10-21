@@ -1,0 +1,16 @@
+__pycache__/
+*.pyc
+*.pyo
+venv/
+.venv/
+.env
+
+# ⚠️ 登录凭证（含豆瓣 token / Cookie），绝不能提交到公开仓库
+backend/douban_config.json
+
+# 运行日志
+backend/server.log
+backend/*.log
+
+# 一次性探测脚本（调试接口用的，不需要入库）
+backend/probe_*.py

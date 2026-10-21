@@ -1,0 +1,74 @@
+<view class="container">
+  <view class="hero">
+    <view class="logo">豆</view>
+    <view class="title">豆瓣小组查询</view>
+    <view class="subtitle">根据用户 ID，查找 TA 加入的小组和历史发言记录</view>
+  </view>
+
+  <view class="search-box">
+    <input
+      class="input"
+      placeholder="输入豆瓣用户 ID / 用户名"
+      placeholder-class="ph"
+      value="{{userId}}"
+      bindinput="onInput"
+      confirm-type="search"
+      bindconfirm="onSearch"
+    />
+    <button class="btn {{loading ? 'btn-loading' : ''}}" bindtap="onSearch" disabled="{{loading}}">
+      {{loading ? '查询中…' : '查 询'}}
+    </button>
+    <view class="example" bindtap="onExample">试试示例用户：55644233</view>
+  </view>
+
+  <view class="error" wx:if="{{error}}">{{error}}</view>
+
+  <!-- 已找到用户时的预览卡片 -->
+  <view class="user-card" wx:if="{{user}}">
+    <image class="avatar" src="{{user.avatar}}" mode="aspectFill" />
+    <view class="info">
+      <view class="name">{{user.name}}</view>
+      <view class="meta">{{user.loc || '未知地区'}} · 注册于 {{user.reg_time || '未知'}}</view>
+      <view class="meta">粉丝 {{user.followers_count || 0}}</view>
+    </view>
+  </view>
+
+  <view class="tips">
+    <view class="tips-title">说明</view>
+    <view class="tips-item">· 用户信息、小组话题为实时真实数据</view>
+    <view class="tips-item">· 「加入的小组」「发言记录」需登录后才是真实数据，否则只能查公开数据</view>
+  </view>
+
+  <!-- 后端设置 / 登录 -->
+  <view class="tips">
+    <view class="tips-title" bindtap="onToggleSettings">⚙️ 后端设置 / 登录 {{showSettings ? '▲' : '▼'}}</view>
+
+    <block wx:if="{{showSettings}}">
+      <view class="tips-item">后端地址（真机预览请填电脑的局域网地址）：</view>
+      <input
+        class="input"
+        placeholder="http://192.168.1.5:8000"
+        value="{{apiBase}}"
+        bindinput="onApiInput"
+      />
+      <button class="btn" bindtap="onSaveApi" disabled="{{testing}}">{{testing ? '测试中…' : '保存并测试'}}</button>
+      <view class="tips-item" wx:if="{{apiMsg}}">{{apiMsg}}</view>
+
+      <view class="tips-item" style="margin-top:16rpx">登录（电脑浏览器登录 douban.com 后复制 dbcl2 的值）：</view>
+      <input
+        class="input"
+        placeholder="粘贴 Cookie，含 dbcl2 即可"
+        value="{{cookie}}"
+        bindinput="onCookieInput"
+      />
+      <input
+        class="input"
+        placeholder="你的 uid，如 281065007"
+        value="{{selfUid}}"
+        bindinput="onUidInput"
+      />
+      <button class="btn" bindtap="onLogin" disabled="{{logining}}">{{logining ? '登录中…' : '登录'}}</button>
+      <view class="tips-item" wx:if="{{loginMsg}}">{{loginMsg}}</view>
+    </block>
+  </view>
+</view>

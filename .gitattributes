@@ -1,0 +1,5 @@
+# 代码与配置统一用 LF
+* text=auto eol=lf
+
+# Windows 批处理必须 CRLF，否则双击可能异常
+*.bat text eol=crlf

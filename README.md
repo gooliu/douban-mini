@@ -1,0 +1,247 @@
+# 豆瓣小组查询小程序（douban-mini）
+
+根据豆瓣用户 ID 查询 **TA 加入过的小组** 和 **历史发言记录** 的微信小程序 Demo。
+
+> ⚠️ **合规提示**：本项目通过豆瓣 APP 内部接口（frodo.douban.com，社区逆向公开的签名算法）获取数据，
+> 仅用于学习研究。请勿高频调用、勿用于商业用途。豆瓣随时可能调整接口导致失效。
+
+## 功能（实测能力矩阵，2026-10）
+
+| 功能 | 谁可以查 | 数据来源 | 验证结果 |
+|------|---------|---------|---------|
+| 用户公开信息 | 任意用户 | ✅ 实时真实 | 昵称/头像/注册时间/粉丝数 |
+| 用户看过的影视 / 书 | 任意用户 | ✅ 实时真实 | 含评分、短评 |
+| 小组详情 | 任意小组 | ✅ 实时真实 | 名称/成员数/简介 |
+| 小组近期话题 | 任意小组 | ✅ 实时真实 | 含作者、评论数 |
+| 小组成员列表 | 任意小组 | ✅ 实时真实 | 大组百万级，**不支持按 uid 过滤** |
+| **搜索小组**（按名找 id） | 任意 | ✅ 实时真实 | 手机端友好 |
+| **搜索用户**（按昵称找 uid） | 任意 | ✅ 实时真实 | 手机端友好 |
+| **加入的小组** | **仅 token 本人** | ✅ 实时真实 | 实测本人 19 个小组 |
+| **完整发言记录** | **仅 token 本人** | ✅ 实时真实 | 实测本人 58 条，可翻页 |
+| 他人加入的小组 | 他人 | ⛔ 豆瓣已关闭 | 无任何可用接口 |
+| **反查他人发帖** | 任意（无需 token） | ✅ 实时真实 | 给候选小组 id 扫描过滤 |
+| **反查他人回帖** | 任意（无需 token） | ✅ 基本可用，⚠️ 触发反爬后受限 | 公开接口，但频繁拉评论会触发反爬 |
+
+> 关键结论：豆瓣把「用户加入的小组」(`joined_groups`) 和「用户发言」(`posted_topics`)
+> 限制为**只有 token 本人可查**——非本人 uid 一律 403 `need_permission`。
+> 他人的「加入的小组」无任何可用接口；他人的「发帖/回帖」可用「反查」变通：给定候选小组扫描过滤。
+
+## 架构
+
+```
+微信小程序 (miniprogram/) ┐
+                         ├─ HTTP (JSON) ─→ FastAPI 后端 (backend/) ←— 签名 + 代理 + 缓存
+Web 网页 (web/index.html) ┘                       │
+                                                  ▼
+                                       豆瓣 frodo.douban.com/api/v2
+```
+
+- **后端**：Python 3.10+ / FastAPI，封装 frodo 内部 API（`_sig` 签名算法已实测可用），
+  自带 10 分钟 TTL 内存缓存；同时挂载 Web 网页版。
+- **Web 前端**：`web/index.html` 单文件 SPA（无构建依赖），复刻小程序三页流程。
+  - 智能搜索：纯数字当 uid 直接查；其他文本自动并行搜用户和小组
+  - 「反查 TA 的小组活动」面板支持「📝 发帖 / 💬 回帖」两种模式
+- **小程序前端**：微信原生小程序，三个页面（输入 → 小组列表 → 发言记录）。
+
+## 快速启动
+
+### 1. 启动后端
+
+```bash
+cd backend
+pip install -r requirements.txt
+uvicorn main:app --host 0.0.0.0 --port 8000 --reload
+```
+
+验证：浏览器打开 http://127.0.0.1:8000/docs 可看到接口文档（Swagger UI）。
+
+### 2a. 网页版使用（推荐，最简单）
+
+后端启动后，浏览器直接打开：
+
+```
+http://127.0.0.1:8000/
+```
+
+会自动跳转到 Web 版查询页面（手机/桌面浏览器均可，与后端同源无跨域问题）。
+输入豆瓣用户 ID（示例 `55644233`）即可查询，交互流程与小程序一致。
+
+### 2b. 小程序版使用
+
+1. 打开「微信开发者工具」→ 导入项目 → 选择 `miniprogram/` 目录
+   （测试号即可，AppID 用 `touristappid`）
+2. 详情 → 本地设置 → 勾选 **「不校验合法域名…」**（因为后端是 http://127.0.0.1）
+3. 编译运行，输入示例用户 ID `55644233` 体验
+
+### 3.（可选）配置 DOUBAN_TOKEN —— 查你自己的真实小组与发言
+
+「加入的小组」「发言记录」只有**登录态本人**能查（豆瓣限制，见上文能力矩阵）。获取方式：
+
+1. 手机安装豆瓣 APP 并登录
+2. 抓包（安卓 HttpCanary；iOS 用 Stream）→ 找 `frodo.douban.com` 的请求 → 复制请求头
+   `Authorization: Bearer xxxxx...` 中 **Bearer 后面那一串**（不要带 "Bearer " 字样）
+3. 后端启动时设置环境变量：
+
+```bash
+# Windows (PowerShell)
+$env:DOUBAN_TOKEN="你的token"; uvicorn main:app --port 8000
+
+# Linux / macOS
+DOUBAN_TOKEN=你的token uvicorn main:app --port 8000
+```
+
+4. 验证：访问 `/api/health`，看到 `"token_configured": true` 且 `"self_uid": "你的uid"`；
+   再访问 `/api/me` 可看到账号昵称、加入小组数、发言总数
+
+配置后网页版会自动识别你的账号（首页出现账号卡片，「我加入的小组 / 我的发言记录」一键查看）。
+
+> 说明：token 对应账号的 uid 由后端自动推断（取 `posted_topics` 首条话题的作者 id）。
+> 若账号从未发过小组话题，可用 `DOUBAN_SELF_UID=你的uid` 手动指定。
+> 注意 `/api/v2/user/me` 返回的是豆瓣**占位账号**（uid 字段是字符串 "me"），不可用于识别本人。
+
+## API 一览
+
+| 方法 | 路径 | 说明 |
+|------|------|------|
+| GET | `/api/health` | 健康检查，显示 token 状态与识别到的本人 uid |
+| GET | `/api/me` | 当前 token 对应账号（前端用它做"我"的入口） |
+| GET | `/api/user/{user_id}` | 用户公开信息（真实） |
+| GET | `/api/user/{user_id}/groups` | 加入的小组（本人真实 / 他人 restricted） |
+| GET | `/api/user/{user_id}/topics?start=&count=` | 发言记录（本人真实可翻页 / 他人 restricted） |
+| GET | `/api/user/{user_id}/comments` | 评论记录（豆瓣无公开接口，仅演示） |
+| GET | `/api/group/{group_id}` | 小组详情（真实） |
+| GET | `/api/group/{group_id}/topics` | 小组近期话题（真实） |
+
+统一响应体：`{ ok, source: "douban"(真实) | "mock"(演示) | "restricted"(豆瓣限制), data, message }`
+
+## 部署到 GitHub（分享给别人访问）
+
+GitHub Pages **只能托管静态页面**，而这个项目的后端是 Python/FastAPI，所以标准做法是：
+
+```
+GitHub Pages（静态前端）  ──fetch──▶  免费云上的 FastAPI 后端  ──▶  豆瓣
+   https://xxx.github.io/...              https://xxx.onrender.com
+```
+
+好消息是：**后端自己也会托管前端**。所以最简单的做法是只部署后端一个服务，
+直接把 `https://xxx.onrender.com/` 发给别人即可（打开就是完整网页，无需 GitHub Pages）。
+
+### 最省事的三步（推荐）
+
+**1. 把代码推到 GitHub**
+
+```bash
+cd douban-mini
+git init
+git add .
+git commit -m "豆瓣小组查询"
+# 在 github.com 新建一个空仓库（不要勾 README），然后：
+git remote add origin https://github.com/<你的用户名>/douban-mini.git
+git branch -M main
+git push -u origin main
+```
+
+> `.gitignore` 已排除 `backend/douban_config.json`（里面有你的豆瓣凭证），不会误提交。
+
+**2. 一键部署后端（Render 免费）**
+
+1. 打开 <https://render.com> → 用 GitHub 登录
+2. `New +` → `Blueprint` → 选刚推的仓库（它会读仓库里的 `render.yaml`）
+3. 一路 `Apply`，等 3~5 分钟构建完成
+4. 拿到地址：`https://douban-mini-xxxx.onrender.com`
+
+Render 免费层 15 分钟无访问会休眠，第一次打开要等 30 秒左右唤醒，属正常现象。
+
+**3. 发给别人**
+
+直接把 `https://douban-mini-xxxx.onrender.com` 发过去即可（手机浏览器也能用，
+还能「添加到主屏幕」当 App 用）。
+
+### 想要 github.io 地址（可选）
+
+1. 仓库 `Settings` → `Pages` → `Source` 选 **GitHub Actions**
+2. `Settings` → `Secrets and variables` → `Actions` → `Variables` → `New repository variable`
+   - 名字：`CLOUD_API`
+   - 值：`https://douban-mini-xxxx.onrender.com`（第 2 步拿到的地址）
+3. 推一次代码或手动跑一下 `Deploy web to GitHub Pages` 工作流
+
+之后 `https://<用户名>.github.io/douban-mini/` 就是前端地址，工作流会自动把后端地址写进去，
+访问者不用手填。没配 `CLOUD_API` 也没关系——页面会提示填一次后端地址，存在浏览器里。
+
+### 云端模式的隐私保护（默认开启）
+
+`render.yaml` 里设了 `DOUBAN_CLOUD=1`，此时：
+
+- 后端**不保存任何人的豆瓣凭证**（不写 `douban_config.json`）
+- 每个人登录时，凭证只存在**他自己的浏览器** localStorage 里
+- 每次请求通过 `X-Douban-Token` / `X-Douban-Cookie` 头带过来，后端按凭证隔离缓存
+- 结果：多人共用一个网址，**互相看不到对方的账号数据**
+
+本机使用（不设该变量）仍是老行为：凭证写进 `backend/douban_config.json`。
+
+### 其它平台
+
+`Dockerfile` 是通用的，Railway / Koyeb / Fly.io / 自建服务器都能直接用：
+
+```bash
+docker build -t douban-mini .
+docker run -d -p 8000:8000 -e DOUBAN_CLOUD=1 douban-mini
+```
+
+> ⚠️ 豆瓣对境外 IP 风控更严。如果部署后经常出现「机器人程序」提示，
+> 建议改用自己的云服务器（国内 IP）+ Cookie 登录。
+
+## 环境变量
+
+| 变量 | 默认值 | 说明 |
+|------|--------|------|
+| `DOUBAN_TOKEN` | 空 | 豆瓣登录态 Bearer token（不含 "Bearer " 前缀） |
+| `DOUBAN_CLOUD` | 空 | 设为 `1` 开启云端模式：凭证不落服务端，只存访问者浏览器 |
+| `DOUBAN_SELF_UID` | 自动推断 | 手动指定 token 对应 uid |
+| `DOUBAN_CACHE_TTL` | 600 | 缓存秒数 |
+| `DOUBAN_SCAN_GROUPS` | 8 | 保留参数（扫描方案已因接口限制失效） |
+
+## 技术要点：frodo 签名算法（已实测）
+
+```
+_sig = base64( HMAC-SHA1( secret, message ) )
+secret = "bf7dddc7c9cfe6f7"
+message = "GET&{urlencode(path, safe='')}&{ts}"           # 匿名请求（3 段）
+message = "GET&{urlencode(path, safe='')}&{token}&{ts}"   # 带登录态（4 段）
+
+查询参数: apikey=0dad551ec0f84ed02907ff5c42e8ec70&_ts={秒级时间戳}&_sig={签名}&os_rom=android
+请求头:   User-Agent 必须形如豆瓣安卓客户端
+注意:     path 必须是完整路径（含 /api/v2 前缀），且 urlencode 时 / 也要编码为 %2F
+```
+
+## 目录结构
+
+```
+douban-mini/
+├── backend/
+│   ├── main.py            # FastAPI 路由（含 /web 静态挂载）
+│   ├── douban_client.py   # frodo API 客户端（签名/缓存/扫描）
+│   ├── mock_data.py       # 演示数据
+│   ├── probe_frodo.py     # 接口探测脚本（调试用，不含任何凭据）
+│   └── requirements.txt
+├── web/
+│   └── index.html         # Web 网页版（单文件，浏览器直接用）
+└── miniprogram/
+    ├── app.js / app.json / app.wxss
+    ├── utils/api.js       # 请求封装
+    └── pages/
+        ├── index/         # 输入用户 ID
+        ├── groups/        # 加入的小组列表
+        └── posts/         # 发言记录 / 小组话题
+```
+
+## 已知限制
+
+1. 豆瓣 2017 年后不再开放官方 API，本项目走的是 APP 内部接口（社区逆向），
+   **接口随时可能变化或失效**
+2. **「加入的小组」「发言记录」只支持查 token 本人的账号**：豆瓣对 `joined_groups`
+   做了权限收紧，非本人 uid 一律 403 `need_permission`；网页版对这一情况会显示蓝色
+   提示条说明原因，而不是伪造数据
+3. token 有有效期（通常数十天），过期后需重新抓包；token 等同账号登录态，注意保管
+4. 小程序正式发布需将后端部署到 HTTPS 域名并在微信后台配置合法域名
+5. 频繁请求可能触发风控，请勿高频调用（后端已内置 10 分钟 TTL 缓存）

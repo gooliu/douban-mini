@@ -1,0 +1,78 @@
+.user-card .go-posts {
+  font-size: 24rpx;
+  color: #42bd56;
+  flex-shrink: 0;
+  padding: 8rpx 0 8rpx 16rpx;
+}
+
+.list-header {
+  font-size: 30rpx;
+  font-weight: 600;
+  margin: 24rpx 24rpx 16rpx;
+  color: #333;
+}
+
+.group-list {
+  padding-bottom: 40rpx;
+}
+
+.group-item {
+  display: flex;
+  align-items: center;
+  background: #fff;
+  margin: 0 24rpx 16rpx;
+  padding: 26rpx 24rpx;
+  border-radius: 16rpx;
+}
+.g-icon {
+  width: 88rpx;
+  height: 88rpx;
+  border-radius: 20rpx;
+  background: #e8f7ec;
+  color: #42bd56;
+  font-size: 40rpx;
+  font-weight: 700;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  margin-right: 22rpx;
+  flex-shrink: 0;
+}
+.g-body {
+  flex: 1;
+  min-width: 0;
+}
+.g-name {
+  font-size: 30rpx;
+  font-weight: 600;
+  margin-bottom: 6rpx;
+}
+.g-desc {
+  font-size: 24rpx;
+  color: #888;
+  margin-bottom: 8rpx;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.g-meta {
+  font-size: 22rpx;
+  color: #aaa;
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+}
+.g-tag {
+  background: #f0f7f2;
+  color: #42bd56;
+  border-radius: 6rpx;
+  padding: 2rpx 10rpx;
+  margin-right: 12rpx;
+  font-size: 20rpx;
+}
+.g-arrow {
+  color: #ccc;
+  font-size: 36rpx;
+  padding-left: 12rpx;
+  flex-shrink: 0;
+}

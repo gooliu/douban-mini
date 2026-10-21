@@ -1,0 +1,65 @@
+.group-head {
+  background: #fff;
+  margin: 24rpx;
+  padding: 28rpx 24rpx;
+  border-radius: 16rpx;
+}
+.group-head .g-name {
+  font-size: 34rpx;
+  font-weight: 700;
+}
+.group-head .g-meta {
+  font-size: 24rpx;
+  color: #42bd56;
+  margin-top: 8rpx;
+}
+
+.topic-list {
+  padding: 0 24rpx 40rpx;
+}
+
+.topic-item {
+  background: #fff;
+  border-radius: 16rpx;
+  padding: 26rpx 24rpx;
+  margin-bottom: 16rpx;
+}
+.t-top {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 12rpx;
+}
+.t-group {
+  background: #e8f7ec;
+  color: #42bd56;
+  font-size: 22rpx;
+  border-radius: 8rpx;
+  padding: 4rpx 14rpx;
+}
+.t-time {
+  font-size: 22rpx;
+  color: #aaa;
+}
+.t-title {
+  font-size: 30rpx;
+  font-weight: 600;
+  line-height: 1.5;
+}
+.t-abstract {
+  margin-top: 10rpx;
+  font-size: 26rpx;
+  color: #777;
+  line-height: 1.6;
+  display: -webkit-box;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 3;
+  overflow: hidden;
+}
+.t-stats {
+  margin-top: 14rpx;
+  font-size: 22rpx;
+  color: #aaa;
+  display: flex;
+  gap: 24rpx;
+}

@@ -1,0 +1,13 @@
+{
+  "desc": "豆瓣小组查询小程序",
+  "appid": "touristappid",
+  "compileType": "miniprogram",
+  "projectname": "douban-mini",
+  "setting": {
+    "urlCheck": false,
+    "es6": true,
+    "postcss": true,
+    "minified": true
+  },
+  "libVersion": "3.0.0"
+}

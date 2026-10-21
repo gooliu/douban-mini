@@ -1,0 +1,25 @@
+{
+  "name": "豆瓣小组查询",
+  "short_name": "豆瓣查询",
+  "description": "根据用户 ID，查找 TA 加入的豆瓣小组和历史发言记录",
+  "start_url": "/web/",
+  "scope": "/web/",
+  "display": "standalone",
+  "orientation": "portrait",
+  "background_color": "#f5f5f5",
+  "theme_color": "#42bd56",
+  "icons": [
+    {
+      "src": "/web/icon-192.png",
+      "sizes": "192x192",
+      "type": "image/png",
+      "purpose": "any"
+    },
+    {
+      "src": "/web/icon-512.png",
+      "sizes": "512x512",
+      "type": "image/png",
+      "purpose": "any maskable"
+    }
+  ]
+}

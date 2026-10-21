@@ -1,0 +1,48 @@
+<view class="page">
+  <!-- 用户模式：用户卡片 -->
+  <view class="user-card" wx:if="{{mode === 'user' && user}}">
+    <image class="avatar" src="{{user.avatar}}" mode="aspectFill" />
+    <view class="info">
+      <view class="name">{{user.name}}</view>
+      <view class="meta">历史发言记录</view>
+    </view>
+  </view>
+
+  <!-- 小组模式：小组标题 -->
+  <view class="group-head" wx:if="{{mode === 'group'}}">
+    <view class="g-name">{{groupName}}</view>
+    <view class="g-meta">近期话题（实时数据）</view>
+  </view>
+
+  <!-- 演示数据提示 -->
+  <view class="mock-banner" wx:if="{{source === 'mock'}}">
+    <view class="dot"></view>
+    <text>{{message || '当前为演示数据，配置 DOUBAN_TOKEN 后为真实数据'}}</text>
+  </view>
+
+  <view class="empty" wx:if="{{loading}}">加载中…</view>
+  <view class="empty" wx:elif="{{error}}">{{error}}</view>
+  <view class="empty" wx:elif="{{!topics.length}}">
+    {{mode === 'user' ? '没有找到发言记录（扫描范围有限，仅覆盖近期话题）' : '该小组暂无话题'}}
+  </view>
+
+  <!-- 发言列表 -->
+  <view class="topic-list" wx:else>
+    <view class="topic-item" wx:for="{{topics}}" wx:key="topic_id"
+          data-url="{{item.url}}" bindtap="onCopyLink">
+      <view class="t-top">
+        <text class="t-group" wx:if="{{item.group_name}}">{{item.group_name}}</text>
+        <text class="t-time">{{item.create_time}}</text>
+      </view>
+      <view class="t-title">{{item.title}}</view>
+      <view class="t-abstract" wx:if="{{item.abstract}}">{{item.abstract}}</view>
+      <view class="t-stats" wx:if="{{mode === 'group'}}">
+        <text>作者：{{item.author_name}}</text>
+      </view>
+      <view class="t-stats" wx:else>
+        <text wx:if="{{item.comments_count}}">💬 {{item.comments_count}}</text>
+        <text wx:if="{{item.likes_count}}">👍 {{item.likes_count}}</text>
+      </view>
+    </view>
+  </view>
+</view>

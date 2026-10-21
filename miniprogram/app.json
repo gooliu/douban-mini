@@ -1,0 +1,15 @@
+{
+  "pages": [
+    "pages/index/index",
+    "pages/groups/groups",
+    "pages/posts/posts"
+  ],
+  "window": {
+    "navigationBarBackgroundColor": "#42bd56",
+    "navigationBarTitleText": "豆瓣小组查询",
+    "navigationBarTextStyle": "white",
+    "backgroundColor": "#f5f6f4",
+    "backgroundTextStyle": "dark"
+  },
+  "sitemapLocation": "sitemap.json"
+}

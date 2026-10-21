@@ -1,0 +1,51 @@
+# 把 web/ 静态前端自动部署到 GitHub Pages
+# 开启方式：仓库 Settings → Pages → Source 选 "GitHub Actions"
+#
+# 可选：在 Settings → Secrets and variables → Actions → Variables 里
+# 加一个 CLOUD_API = https://你的服务.onrender.com
+# 工作流会自动把它写进前端，访问者打开 github.io 地址就能直接用，无需手填后端地址。
+name: Deploy web to GitHub Pages
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+concurrency:
+  group: pages
+  cancel-in-progress: true
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: 注入云端后端地址
+        run: |
+          if [ -n "${{ vars.CLOUD_API }}" ]; then
+            sed -i "s|const DEFAULT_CLOUD_API = '';|const DEFAULT_CLOUD_API = '${{ vars.CLOUD_API }}';|" web/index.html
+            echo "已注入后端地址: ${{ vars.CLOUD_API }}"
+          else
+            echo "未设置 CLOUD_API，前端将让访问者手动填后端地址"
+          fi
+
+      - uses: actions/configure-pages@v5
+      - uses: actions/upload-pages-artifact@v3
+        with:
+          path: web
+
+  deploy:
+    needs: build
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - id: deployment
+        uses: actions/deploy-pages@v4

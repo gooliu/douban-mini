@@ -1,0 +1,1969 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
+<title>豆瓣小组查询</title>
+<!-- 加到手机桌面后像 App 一样全屏打开，不用装小程序 -->
+<link rel="manifest" href="manifest.json">
+<meta name="theme-color" content="#42bd56">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="default">
+<meta name="apple-mobile-web-app-title" content="豆瓣查询">
+<link rel="apple-touch-icon" href="apple-touch-icon.png">
+<link rel="icon" href="icon-192.png">
+<style>
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  body {
+    font-family: -apple-system, BlinkMacSystemFont, 'Helvetica Neue', 'PingFang SC',
+      'Hiragino Sans GB', 'Microsoft YaHei', sans-serif;
+    background: #f5f6f4; color: #333; font-size: 15px;
+    min-height: 100vh;
+  }
+  .phone {
+    max-width: 480px; margin: 0 auto; min-height: 100vh;
+    background: #f5f6f4; position: relative;
+  }
+  /* ---------- 顶部栏 ---------- */
+  .navbar {
+    background: #42bd56; color: #fff; padding: 14px 18px;
+    display: none; align-items: center; gap: 12px;
+    position: sticky; top: 0; z-index: 10;
+  }
+  .navbar .back { cursor: pointer; font-size: 20px; line-height: 1; padding: 2px 6px; }
+  .navbar .title { font-size: 17px; font-weight: 600; flex: 1;
+    overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+
+  .view { display: none; animation: fadeIn .18s ease; }
+  .view.active { display: block; }
+  @keyframes fadeIn { from { opacity: 0; transform: translateY(6px); } to { opacity: 1; } }
+
+  /* ---------- 首页 ---------- */
+  .hero { text-align: center; padding: 80px 0 48px; }
+  .hero .logo {
+    width: 84px; height: 84px; line-height: 84px; margin: 0 auto 18px;
+    border-radius: 20px; background: #42bd56; color: #fff;
+    font-size: 48px; font-weight: 700;
+  }
+  .hero h1 { font-size: 26px; letter-spacing: 2px; }
+  .hero p { margin-top: 10px; font-size: 13px; color: #888; }
+
+  .search-box { margin: 0 32px; }
+  .search-box input {
+    width: 100%; padding: 14px 18px; font-size: 16px;
+    border: 1px solid #e5e5e5; border-radius: 12px; outline: none;
+    background: #fff; transition: border .15s;
+  }
+  .search-box input:focus { border-color: #42bd56; }
+  .search-box button {
+    width: 100%; margin-top: 16px; padding: 13px; font-size: 16px;
+    background: #42bd56; color: #fff; border: none; border-radius: 12px;
+    cursor: pointer; letter-spacing: 6px; transition: background .15s;
+  }
+  .search-box button:hover { background: #3aa84c; }
+  .search-box button:disabled { background: #a5d9b0; cursor: not-allowed; }
+  .example { text-align: center; margin-top: 16px; font-size: 12px;
+    color: #42bd56; cursor: pointer; text-decoration: underline; }
+
+  .error-msg {
+    margin: 20px 32px 0; background: #fdecea; color: #d93025;
+    border-radius: 10px; padding: 12px 16px; font-size: 13px;
+    word-break: break-all; display: none;
+  }
+
+  /* ---------- 已登录账号卡片 ---------- */
+  .me-card {
+    margin: 0 32px 18px; background: #fff; border-radius: 14px;
+    padding: 14px 16px; display: none; box-shadow: 0 1px 6px rgba(0,0,0,.04);
+  }
+  .me-card .me-top { display: flex; align-items: center; gap: 10px; }
+  .me-card img { width: 40px; height: 40px; border-radius: 50%; background: #eee; }
+  .me-card .me-name { font-size: 15px; font-weight: 600; }
+  .me-card .me-sub { font-size: 11px; color: #999; margin-top: 2px; }
+  .me-card .me-actions { display: flex; gap: 10px; margin-top: 12px; }
+  .me-card .me-actions div {
+    flex: 1; text-align: center; padding: 9px 0; border-radius: 10px;
+    font-size: 13px; background: #e8f7ec; color: #2f9e44; cursor: pointer;
+  }
+  .me-card .me-actions div:active { opacity: .8; }
+
+  /* 后端未连接提示 */
+  .backend-banner {
+    margin: 12px 16px; padding: 14px 16px; background: #fff5f5;
+    border: 1px solid #ffc9c9; border-radius: 8px; color: #c92a2a;
+    font-size: 13px; line-height: 1.7;
+  }
+  .backend-banner code { background: #ffe3e3; padding: 1px 6px; border-radius: 4px; }
+  .backend-banner a { color: #c92a2a; text-decoration: underline; cursor: pointer; }
+  .bb-set { display: flex; gap: 6px; margin: 8px 0 4px; }
+  .bb-set input {
+    flex: 1; min-width: 0; padding: 7px 9px; font-size: 13px;
+    border: 1px solid #ddd; border-radius: 6px; color: #333; background: #fff;
+  }
+  .bb-set button {
+    padding: 7px 14px; font-size: 13px; border: 0; border-radius: 6px;
+    background: #c92a2a; color: #fff; cursor: pointer;
+  }
+
+  /* 未登录时的引导卡（三种登录方式）*/
+  .login-prompt {
+    margin: 12px 16px; padding: 16px; background: #fff;
+    border: 1px solid #e6e6e6; border-radius: 12px;
+  }
+  .login-prompt h3 { margin: 0 0 6px; font-size: 16px; }
+  .login-prompt .lp-hint { font-size: 12px; color: #888; margin: 0 0 10px; }
+  .lp-section { margin: 12px 0 0 0; padding-top: 12px; border-top: 1px dashed #eee; }
+  .lp-section:first-of-type { border-top: 0; padding-top: 0; }
+  .lp-tag {
+    display: inline-block; font-size: 11px; padding: 2px 7px;
+    border-radius: 4px; margin-right: 6px; font-weight: 600;
+  }
+  .lp-tag.recommend { background: #2a6; color: #fff; }
+  .lp-tag.normal { background: #eee; color: #555; }
+  .lp-big-btn {
+    display: block; padding: 12px; border-radius: 8px;
+    background: #2a6; color: #fff; text-align: center;
+    font-weight: 600; font-size: 14px; margin: 10px 0; cursor: pointer;
+    border: 0;
+  }
+  .lp-big-btn:active { background: #185c30; }
+  .lp-input {
+    width: 100%; padding: 9px 11px; border: 1px solid #d9d9d9;
+    border-radius: 6px; font-size: 13px; box-sizing: border-box; margin: 6px 0;
+    font-family: inherit;
+  }
+  .lp-row { display: flex; gap: 6px; align-items: center; }
+  .lp-row .lp-input { flex: 1; }
+  .lp-row label { font-size: 12px; color: #555; min-width: 56px; }
+  .lp-status { font-size: 12px; margin: 6px 0; min-height: 18px; }
+  .lp-status.ok { color: #2a6; }
+  .lp-status.err { color: #c92a2a; }
+  .lp-step { font-size: 12px; color: #555; line-height: 1.7; margin: 4px 0; }
+  .lp-step code { background: #f0f0f0; padding: 1px 5px; border-radius: 4px; font-size: 12px; }
+  .lp-bk {
+    display: inline-block; padding: 8px 14px; border-radius: 6px;
+    background: #2a6; color: #fff; font-size: 13px; font-weight: 600;
+    text-decoration: none; cursor: grab; margin: 6px 0;
+  }
+  .lp-bk:active { cursor: grabbing; background: #185c30; }
+
+  /* ---------- 受限提示（豆瓣接口限制） ---------- */
+  .info-banner {
+    margin: 12px 16px; padding: 12px 14px; border-radius: 10px;
+    background: #eef4ff; color: #3266b3; font-size: 12px; line-height: 1.7;
+  }
+  .info-banner .ib-title { font-weight: 600; margin-bottom: 3px; }
+
+  /* ---------- 反查他人发言面板 ---------- */
+  .lookup-panel { margin: 12px 16px; background: #fff; border-radius: 14px; padding: 16px; }
+  .lookup-panel .lp-title { font-size: 15px; font-weight: 600; margin-bottom: 4px; }
+  .lookup-panel .lp-desc { font-size: 12px; color: #999; line-height: 1.7; margin-bottom: 12px; }
+  .lookup-panel label { display: block; font-size: 12px; color: #666; margin: 12px 0 6px; }
+  .lookup-panel input {
+    width: 100%; padding: 11px 13px; font-size: 14px;
+    border: 1px solid #e5e5e5; border-radius: 10px; outline: none;
+  }
+  .lookup-panel input:focus { border-color: #42bd56; }
+  .lookup-panel .lp-row { display: flex; gap: 10px; align-items: flex-end; }
+  .lookup-panel .lp-row > div:first-child { flex: 1; }
+  .lookup-panel .lp-row > div:last-child { width: 90px; }
+  .lp-btn {
+    width: 100%; margin-top: 14px; padding: 12px; font-size: 15px;
+    background: #42bd56; color: #fff; border: none; border-radius: 10px;
+    cursor: pointer;
+  }
+  .lp-btn:hover { background: #3aa84c; }
+  .lp-btn:disabled { background: #a5d9b0; cursor: not-allowed; }
+  .lp-btn.ghost { background: #f0f7f2; color: #2f9e44; margin-top: 10px; }
+  .lp-hint { font-size: 11px; color: #aaa; margin-top: 10px; line-height: 1.7; }
+  .lp-modes { display: flex; background: #f2f5f2; border-radius: 10px; padding: 4px; margin: 10px 0 0; }
+  .lp-mode {
+    flex: 1; text-align: center; padding: 9px 0; font-size: 14px; border-radius: 8px;
+    color: #666; cursor: pointer; transition: all .15s;
+  }
+  .lp-mode.active { background: #fff; color: #2f9e44; font-weight: 600; box-shadow: 0 1px 3px rgba(0,0,0,.06); }
+  .lp-mode:not(.active):active { background: #e5eae5; }
+
+  .sg-item {
+    display: flex; align-items: center; justify-content: space-between;
+    padding: 10px 0; border-bottom: 1px solid #f2f2f2; cursor: pointer;
+  }
+  .sg-item:last-child { border-bottom: none; }
+  .sg-item .sg-name { font-size: 14px; font-weight: 500; }
+  .sg-item .sg-meta { font-size: 11px; color: #aaa; margin-top: 2px; }
+  .sg-item .sg-add { font-size: 12px; color: #42bd56; flex-shrink: 0; padding-left: 10px; }
+
+  /* 搜索结果页：用户卡片 */
+  .user-mini {
+    display: flex; align-items: center; gap: 12px; padding: 12px 16px;
+    background: #fff; border-bottom: 1px solid #f2f2f2; cursor: pointer;
+  }
+  .user-mini:active { background: #f7faf7; }
+  .user-mini img { width: 40px; height: 40px; border-radius: 50%; background: #eee; flex-shrink: 0; }
+  .user-mini .um-name { font-size: 14px; font-weight: 500; color: #333; }
+  .user-mini .um-sub { font-size: 11px; color: #999; margin-top: 2px; }
+  .user-mini .um-go { color: #ccc; font-size: 22px; line-height: 1; margin-left: auto; }
+
+  /* ---------- 兴趣（看过的影视书） ---------- */
+  .interest-item {
+    display: flex; gap: 12px; background: #fff; border-radius: 14px;
+    padding: 13px 14px; margin: 0 16px 10px;
+  }
+  .interest-item img {
+    width: 52px; height: 74px; border-radius: 6px; object-fit: cover;
+    background: #f0f0f0; flex-shrink: 0;
+  }
+  .interest-item .i-body { flex: 1; min-width: 0; }
+  .interest-item .i-title { font-size: 14px; font-weight: 600; }
+  .interest-item .i-meta { font-size: 11px; color: #aaa; margin-top: 3px; }
+  .interest-item .i-comment {
+    font-size: 12px; color: #777; margin-top: 6px; line-height: 1.6;
+    display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 3; overflow: hidden;
+  }
+  .stars { color: #f5a623; font-size: 12px; letter-spacing: 1px; }
+
+  .tips { margin: 48px 32px 0; padding: 18px; background: #fff; border-radius: 14px; }
+  .tips .t-title { font-size: 13px; font-weight: 600; color: #666; margin-bottom: 8px; }
+  .tips .t-item { font-size: 12px; color: #999; line-height: 1.8; }
+
+  /* ---------- 通用 ---------- */
+  .mock-banner {
+    display: flex; align-items: center; gap: 8px;
+    margin: 12px 16px; padding: 9px 14px;
+    background: #fff8e6; color: #b27b00; font-size: 12px; border-radius: 10px;
+  }
+  .mock-banner .dot { width: 7px; height: 7px; border-radius: 50%;
+    background: #f5a623; flex-shrink: 0; }
+
+  .user-card {
+    display: flex; align-items: center; background: #fff;
+    padding: 16px; border-radius: 14px; margin: 12px 16px;
+  }
+  .user-card img { width: 56px; height: 56px; border-radius: 50%;
+    margin-right: 14px; background: #eee; object-fit: cover; }
+  .user-card .info { flex: 1; min-width: 0; }
+  .user-card .name { font-size: 17px; font-weight: 600; margin-bottom: 4px; }
+  .user-card .meta { font-size: 12px; color: #999; }
+  .user-card .go-posts { font-size: 13px; color: #42bd56; cursor: pointer;
+    flex-shrink: 0; padding: 4px 0 4px 10px; white-space: nowrap; }
+
+  /* ---------- 全量扫描 ---------- */
+  .scan-link { color: #2e963a; cursor: pointer; }
+  .scan-link:hover { text-decoration: underline; }
+  .scan-form {
+    margin: 12px 16px 6px; padding: 14px; background: #fff;
+    border: 1px solid #eee; border-radius: 12px;
+  }
+  .scan-form .sf-row { display: flex; align-items: center; gap: 8px; margin-bottom: 10px; flex-wrap: wrap; }
+  .scan-form .sf-row > label { font-size: 12px; color: #555; min-width: 64px; }
+  .scan-form .sf-row > input, .scan-form .sf-row > select {
+    flex: 1; min-width: 0; padding: 7px 9px; border: 1px solid #d9d9d9; border-radius: 6px;
+    font-size: 13px; box-sizing: border-box;
+  }
+  .scan-form .sf-row > input:focus, .scan-form .sf-row > select:focus { outline: none; border-color: #2e963a; }
+  .scan-form .sf-chips { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 6px; min-height: 26px; }
+  .scan-form .sf-chip {
+    display: inline-flex; align-items: center; gap: 4px;
+    padding: 3px 8px; background: #e7f5ea; color: #2b8a3e; border-radius: 999px;
+    font-size: 12px; cursor: default;
+  }
+  .scan-form .sf-chip .x { cursor: pointer; color: #888; }
+  .scan-form .sf-chip .x:hover { color: #c92a2a; }
+  .scan-form button {
+    width: 100%; padding: 10px; border: none; border-radius: 8px;
+    background: #2e963a; color: #fff; font-size: 14px; cursor: pointer;
+  }
+  .scan-form button:disabled { background: #aaa; }
+  .scan-form .sf-est {
+    font-size: 12px; color: #666; margin-top: 6px; line-height: 1.6;
+  }
+
+  .job-card {
+    margin: 10px 16px; padding: 12px 14px; background: #fff;
+    border: 1px solid #eee; border-radius: 10px;
+  }
+  .job-card .jc-head { display: flex; justify-content: space-between; align-items: center; margin-bottom: 6px; }
+  .job-card .jc-title { font-size: 14px; font-weight: 600; }
+  .job-card .jc-status {
+    font-size: 11px; padding: 2px 8px; border-radius: 999px;
+    background: #f1f3f5; color: #555;
+  }
+  .job-card .jc-status.running { background: #e7f5ff; color: #1864ab; }
+  .job-card .jc-status.done    { background: #d3f9d8; color: #2b8a3e; }
+  .job-card .jc-status.canceled{ background: #fff5f5; color: #c92a2a; }
+  .job-card .jc-status.error   { background: #fff5f5; color: #c92a2a; }
+  .job-card .jc-meta { font-size: 12px; color: #666; line-height: 1.7; }
+  .job-card .jc-progress { margin: 8px 0; height: 6px; background: #f1f3f5; border-radius: 3px; overflow: hidden; }
+  .job-card .jc-bar { height: 100%; background: linear-gradient(90deg, #2e963a, #37b24d); transition: width .4s; }
+  .job-card .jc-actions { display: flex; gap: 6px; margin-top: 6px; }
+  .job-card .jc-actions button {
+    padding: 4px 10px; font-size: 12px; border-radius: 6px; border: 1px solid #ddd; background: #fff; color: #555;
+  }
+  .job-card .jc-actions button.danger { color: #c92a2a; border-color: #ffc9c9; }
+  .job-card .jc-hits { margin-top: 8px; }
+  .job-card .jc-hits .hit { padding: 6px 0; border-top: 1px dashed #eee; font-size: 12px; }
+  .job-card .jc-hits .hit-time { color: #999; font-size: 11px; }
+  .job-card .jc-hits .hit-title { color: #1864ab; text-decoration: none; }
+  .job-card .jc-note { font-size: 11px; color: #c92a2a; margin-top: 4px; }
+
+  /* ---------- 登录状态按钮 / Token 弹窗 ---------- */
+  .login-fab {
+    position: absolute; top: 12px; right: 12px; z-index: 30;
+    display: flex; align-items: center; gap: 5px;
+    padding: 5px 11px; border-radius: 999px; font-size: 12px; cursor: pointer;
+    background: rgba(255,255,255,.92); border: 1px solid #d9d9d9; color: #444;
+    box-shadow: 0 1px 4px rgba(0,0,0,.08); user-select: none;
+  }
+  .login-fab .lf-dot { width: 7px; height: 7px; border-radius: 50%; background: #bbb; }
+  .login-fab.ok .lf-dot { background: #37b24d; }
+  .login-fab.warn { background: #fff5f5; border-color: #ffc9c9; color: #c92a2a; }
+  .login-fab.warn .lf-dot { background: #e03131; }
+
+  .modal-mask {
+    position: fixed; inset: 0; background: rgba(0,0,0,.45); z-index: 100;
+    display: none; align-items: center; justify-content: center; padding: 16px;
+  }
+  .modal-mask.show { display: flex; }
+  .modal {
+    background: #fff; border-radius: 14px; padding: 18px; width: 100%; max-width: 380px;
+    max-height: 88vh; overflow-y: auto; box-shadow: 0 8px 30px rgba(0,0,0,.2);
+  }
+  .modal h3 { margin: 0 0 8px; font-size: 16px; }
+  .modal textarea {
+    width: 100%; height: 66px; box-sizing: border-box; margin: 8px 0;
+    padding: 9px; border: 1px solid #d9d9d9; border-radius: 8px;
+    font-size: 13px; font-family: monospace; resize: none; word-break: break-all;
+  }
+  .modal textarea:focus { outline: none; border-color: #2e963a; }
+  .modal .m-tip { font-size: 12px; color: #666; line-height: 1.6; margin: 0; }
+  .modal .m-sub2 {
+    font-size: 12px; font-weight: 600; color: #2a6; margin: 10px 0 4px;
+    padding-left: 8px; border-left: 3px solid #2a6;
+  }
+  .modal .bk {
+    display: inline-block; padding: 8px 14px; border-radius: 6px;
+    background: #2a6; color: #fff; font-size: 13px; font-weight: 600;
+    text-decoration: none; cursor: grab; user-select: none;
+  }
+  .modal .bk:active { cursor: grabbing; background: #185c30; }
+  .modal .m-sub { font-size: 12px; color: #444; font-weight: 500; margin: 10px 0 2px; }
+  .modal .m-status { font-size: 13px; margin: 8px 0; min-height: 18px; word-break: break-all; }
+  .modal .m-status.ok { color: #2b8a3e; }
+  .modal .m-status.err { color: #c92a2a; }
+  .modal button {
+    width: 100%; padding: 10px; border-radius: 8px; border: none;
+    background: #2e963a; color: #fff; font-size: 14px; cursor: pointer; margin-top: 4px;
+  }
+  .modal button.ghost { background: #f1f3f5; color: #555; margin-top: 8px; }
+  .modal details { margin-top: 12px; font-size: 12px; color: #555; }
+  .modal details summary { cursor: pointer; color: #2e963a; font-weight: 600; }
+  .modal details ol { padding-left: 18px; line-height: 1.8; margin: 6px 0 0; }
+  .modal code { background: #f1f3f5; padding: 1px 4px; border-radius: 3px; }
+  .relink { color: #2e963a; text-decoration: underline; cursor: pointer; }
+
+  /* 分享面板 */
+  .share-qr { text-align: center; margin: 10px 0 12px; }
+  .share-qr svg { width: 178px; height: 178px; }
+  .share-url { display: flex; gap: 8px; align-items: stretch; margin-bottom: 8px; }
+  .share-url input {
+    flex: 1; min-width: 0; padding: 9px 10px; border: 1px solid #d9d9d9;
+    border-radius: 8px; font-size: 13px; font-family: monospace; background: #fafafa;
+  }
+  .share-url button { width: auto; margin: 0; padding: 9px 14px; white-space: nowrap; }
+  .share-warn {
+    background: #fff8e6; border: 1px solid #ffe0a3; border-radius: 8px;
+    padding: 10px; font-size: 12px; color: #8a5a00; line-height: 1.7; margin: 10px 0;
+  }
+  .share-warn b { color: #a8630a; }
+  .share-steps { font-size: 12px; color: #555; line-height: 1.8; }
+  .share-steps b { color: #333; }
+  .share-ok { font-size: 12px; color: #2b8a3e; margin: 6px 0 0; }
+
+  .list-header { font-size: 15px; font-weight: 600; margin: 14px 16px 10px; }
+
+  .empty { text-align: center; color: #999; font-size: 13px; padding: 64px 0; }
+
+  /* ---------- 小组列表 ---------- */
+  .group-item {
+    display: flex; align-items: center; background: #fff;
+    margin: 0 16px 10px; padding: 15px 14px; border-radius: 14px;
+    cursor: pointer; transition: transform .1s;
+  }
+  .group-item:hover { transform: translateY(-1px); }
+  .group-item .g-icon {
+    width: 46px; height: 46px; border-radius: 12px; background: #e8f7ec;
+    color: #42bd56; font-size: 22px; font-weight: 700;
+    display: flex; align-items: center; justify-content: center;
+    margin-right: 13px; flex-shrink: 0;
+  }
+  .group-item .g-body { flex: 1; min-width: 0; }
+  .group-item .g-name { font-size: 15px; font-weight: 600; margin-bottom: 3px; }
+  .group-item .g-desc { font-size: 12px; color: #888; margin-bottom: 5px;
+    overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .group-item .g-meta { font-size: 11px; color: #aaa; display: flex;
+    align-items: center; flex-wrap: wrap; gap: 6px; }
+  .group-item .g-tag { background: #f0f7f2; color: #42bd56; border-radius: 4px;
+    padding: 1px 7px; font-size: 11px; }
+  .group-item .g-arrow { color: #ccc; font-size: 20px; padding-left: 8px; }
+
+  /* ---------- 话题列表 ---------- */
+  .group-head { background: #fff; margin: 12px 16px; padding: 16px; border-radius: 14px; }
+  .group-head .g-name { font-size: 17px; font-weight: 700; }
+  .group-head .g-meta { font-size: 12px; color: #42bd56; margin-top: 5px; }
+
+  .topic-item { background: #fff; border-radius: 14px; padding: 15px 14px;
+    margin: 0 16px 10px; }
+  .t-top { display: flex; justify-content: space-between; align-items: center;
+    margin-bottom: 7px; }
+  .t-group { background: #e8f7ec; color: #42bd56; font-size: 11px;
+    border-radius: 5px; padding: 2px 8px; }
+  .t-time { font-size: 11px; color: #aaa; }
+  .t-title { font-size: 15px; font-weight: 600; line-height: 1.5; }
+  .t-abstract { margin-top: 6px; font-size: 13px; color: #777; line-height: 1.6;
+    display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 3; overflow: hidden; }
+  .t-stats { margin-top: 9px; font-size: 11px; color: #aaa; display: flex; gap: 14px; }
+  .t-stats .author { color: #42bd56; }
+
+  footer { text-align: center; font-size: 11px; color: #bbb; padding: 24px 0 32px; }
+
+  .load-more {
+    margin: 0 16px 10px; padding: 13px 0; text-align: center;
+    background: #fff; border-radius: 12px; color: #42bd56;
+    font-size: 13px; cursor: pointer;
+  }
+  .load-more:active { opacity: .7; }
+</style>
+</head>
+<body>
+<div class="phone">
+
+  <!-- 登录状态按钮（所有页面可见） -->
+  <div class="login-fab" id="loginFab" onclick="openTokenModal()">
+    <span class="lf-dot"></span><span id="loginFabText">登录</span>
+  </div>
+
+  <!-- Token 更新弹窗 -->
+  <div class="modal-mask" id="tokenModal" onclick="if (event.target === this) closeTokenModal()">
+    <div class="modal">
+      <h3 id="tokenModalTitle">更新豆瓣登录</h3>
+      <p class="m-tip">
+        豆瓣把「加入的小组 / 完整发言」设为仅本人可见，需要登录态 token。
+        token 有效期有限，失效后在这里粘贴新 token 即可，<b>不用重启服务</b>。
+        不登录也能用：用户信息、小组搜索、反查发帖 / 回帖（公开数据）。
+      </p>
+      <div class="m-sub">方式一：Bearer token（手机抓包）</div>
+      <textarea id="tokenInput" spellcheck="false"
+                placeholder="粘贴 Bearer token；也可以直接粘贴整段抓包文本，会自动提取"></textarea>
+      <div class="m-sub">方式二：网页 Cookie（电脑浏览器，更省事）</div>
+      <textarea id="cookieInput" spellcheck="false"
+                placeholder='粘贴 Cookie，含 dbcl2 即可，如：dbcl2="281065007:abc123..."'></textarea>
+      <div class="sf-row" style="display:flex;gap:8px;align-items:center;margin:6px 0">
+        <label style="font-size:12px;color:#555;min-width:52px">你的 uid</label>
+        <input id="selfUidInput" placeholder="Cookie 登录需填，如 281065007"
+               style="flex:1;padding:7px 9px;border:1px solid #d9d9d9;border-radius:6px;font-size:13px">
+      </div>
+      <div class="m-status" id="tokenStatus"></div>
+      <button id="tokenSaveBtn" onclick="saveToken()">验证并保存</button>
+      <button class="ghost" onclick="closeTokenModal()">取消</button>
+      <details>
+        <summary>方式一：怎么抓 token？（三步）</summary>
+        <ol>
+          <li>手机装抓包 App：<b>HTTPCanary</b>（安卓）或 <b>Stream</b>（iOS），
+              并安装/信任它的 CA 证书。</li>
+          <li>打开抓包 → 只选「豆瓣」App → 打开豆瓣 App 并<b>确认已登录</b>，随便刷一下首页。</li>
+          <li>在抓包记录里找 <code>frodo.douban.com</code> 的请求，
+              看请求头 <code>Authorization: Bearer xxxx</code>，
+              把 <code>Bearer</code> 后面那串复制出来粘到上面。</li>
+        </ol>
+      </details>
+      <details open>
+        <summary>方式二：怎么复制 Cookie？（推荐，有效期更长）</summary>
+
+        <div class="m-sub2">① 一键小书签（最省事，不用 F12）</div>
+        <p class="m-tip">把下面这个按钮<b>拖到浏览器的书签栏</b>（书签栏没显示就按
+          <code>Ctrl+Shift+B</code> 调出来）：</p>
+        <p style="margin:8px 0">
+          <a class="bk" id="bkLink"
+             href="javascript:(function(){var c=document.cookie||'';var m=c.match(/dbcl2=([^;]*)/);var v=m?decodeURIComponent(m[1]):'';if(!v){alert('没读到 dbcl2。请确认当前页面是 www.douban.com 且已登录。若读不到，请用 Ctrl+Shift+I 打开开发者工具手动复制。');return;}var ck=(c.match(/(?:^|;\s*)ck=([^;]*)/)||[])[1]||'';var cookie='dbcl2='+v+(ck?'; ck='+ck:'');var uid=v.split(String.fromCharCode(34)).join('').split(':')[0];var fallback=function(){if(navigator.clipboard&&navigator.clipboard.writeText){navigator.clipboard.writeText(cookie).then(function(){alert('自动提交失败，已复制到剪贴板，请粘到 Cookie 框（uid '+uid+'）');},function(){prompt('手动复制这段：',cookie);});}else{prompt('手动复制这段：',cookie);}};fetch('http://127.0.0.1:8000/api/config/token',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({cookie:cookie,self_uid:uid})}).then(function(r){return r.json();}).then(function(j){if(j&&j.ok){alert('登录成功：'+(j.name||'')+'（uid '+j.uid+'）');}else{alert('豆瓣拒绝了凭证：'+((j&&j.detail)||'未知原因'));fallback();}}).catch(function(){var url='http://127.0.0.1:8000/api/cookie-login?cookie='+encodeURIComponent(cookie)+'&amp;uid='+encodeURIComponent(uid);var w=window.open(url,'_blank');if(w){alert('已新开标签页提交，请看那个页面的结果。');}else{fallback();}});})()"
+             onclick="copyBookmark(event);return false;">📋 一键登录豆瓣</a>
+        </p>
+        <p class="m-tip">之后：打开 <b>www.douban.com</b> 登录 → 点一下书签栏上的
+          「📋 复制豆瓣Cookie」→ 弹窗说已复制 → 回来粘到上面的 Cookie 框。
+          拖不动的话，右键按钮选「复制链接地址」，手动新建书签粘贴进去。</p>
+
+        <div class="m-sub2">② 手动复制（开发者工具）</div>
+        <ol>
+          <li>电脑浏览器打开 <b>www.douban.com</b> 并登录。</li>
+          <li>打开开发者工具：<code>Ctrl+Shift+I</code>（或 <code>F12</code>；
+              页面空白处<b>右键 → 检查</b>；菜单 → 更多工具 → 开发者工具）。</li>
+          <li>切到 <code>Application</code>（应用）→ 左侧 <code>Cookies</code> →
+              <code>https://www.douban.com</code>。</li>
+          <li>找到 <code>dbcl2</code>，复制它的值（形如 <code>"281065007:xxxxxxxx"</code>），
+              粘到上面 Cookie 框；再在「你的 uid」里填 <code>281065007</code>。</li>
+        </ol>
+        <p class="m-tip"><b>F12 没反应？</b>常见原因：① 在预览面板 / 小程序里按的——
+          请用自己电脑的 Chrome 或 Edge 打开 <code>http://127.0.0.1:8000/</code>；
+          ② 笔记本要按 <code>Fn+F12</code>；③ 直接改用上面的小书签，完全不用开发者工具。</p>
+        <p class="m-tip">Cookie 有效期通常远长于 frodo token（token 常常一小时内就失效），
+          全量扫描动辄几十分钟，建议优先用 Cookie。</p>
+      </details>
+      <p class="m-tip">凭证只保存在本机 <code>backend/douban_config.json</code>，不会上传到任何地方。</p>
+    </div>
+  </div>
+
+  <!-- 分享给他人弹窗 -->
+  <div class="modal-mask" id="shareModal" onclick="if (event.target === this) closeShareModal()">
+    <div class="modal">
+      <h3>📤 分享给他人使用</h3>
+
+      <div class="m-sub" style="margin-top:12px">① 同一 WiFi（局域网）— 手机扫码即用</div>
+      <div class="share-qr" id="shareQr"><span style="color:#999;font-size:12px">加载中…</span></div>
+      <div class="share-url">
+        <input id="shareUrl" readonly value="">
+        <button onclick="copyShareUrl()">复制</button>
+      </div>
+      <div class="share-ok" id="shareCopyTip" style="display:none">✅ 已复制</div>
+      <div class="share-steps">
+        对方手机连<b>同一个 WiFi</b>，用相机 / 浏览器扫上面的码，或直接在浏览器输入这个地址。<br>
+        <b>打不开？</b>多半是 Windows 防火墙拦了：右键用<b>管理员身份</b>运行项目目录里的
+        <code>分享给他人.bat</code>，它会自动放行 8000 端口。
+      </div>
+
+      <div class="share-warn" id="shareCloudTip" style="display:none;background:#eef7ff;border-color:#b6dcfb;color:#1a5c8a"></div>
+
+      <div class="share-warn" id="shareWarn" style="display:none">
+        ⚠️ <b>你现在是登录状态</b>（uid <span id="shareUid"></span>）。<br>
+        别人访问这台机器上的工具时，看到的「我加入的小组 / 我的发言」就是<b>你的账号数据</b>。
+        如果不想暴露，先点下面的「退出登录」再分享；退出后公开功能（查他人、反查、小组搜索）照常可用。
+      </div>
+      <button class="ghost" id="logoutBtn" onclick="doLogout()" style="display:none">退出登录（清除本机凭证）</button>
+
+      <details style="margin-top:14px">
+        <summary>📱 加到手机桌面（像 App，不用小程序、不用审核）</summary>
+        <div class="share-steps" style="margin-top:6px">
+          对方用手机浏览器打开上面的地址后：<br>
+          <b>iPhone（Safari）</b>：底部分享按钮 ↑ → 「添加到主屏幕」<br>
+          <b>安卓（Chrome / Edge）</b>：右上角 ⋮ → 「添加到主屏幕」/「安装应用」<br>
+          之后桌面会出现一个绿色「豆」图标，点开就是全屏无地址栏，<b>和小程序体验几乎一样</b>，
+          还不用备案域名、不用过微信审核。
+        </div>
+      </details>
+
+      <details>
+        <summary>不在同一个 WiFi？用内网穿透（外网也能访问）</summary>
+        <div class="share-steps" style="margin-top:6px">
+          双击项目目录里的 <code>内网穿透分享.bat</code>，会引导你用
+          <b>cpolar</b> 或 <b>Cloudflare Tunnel</b> 生成一个公网网址，
+          发给任何人都能打开（不要求同 WiFi）。<br>
+          注意：网址是临时的，<b>用完记得关掉</b>，别长期暴露在公网上。
+        </div>
+      </details>
+
+      <details>
+        <summary>想彻底长期分享？部署到服务器</summary>
+        <div class="share-steps" style="margin-top:6px">
+          买一台云服务器（腾讯云 / 阿里云轻量，几十块一个月），
+          把 <code>douban-mini/</code> 整个目录拷上去，装 Python 依赖后运行
+          <code>uvicorn main:app --host 0.0.0.0 --port 8000</code>，
+          再在安全组放行 8000 端口，就有一个永久可访问的地址了。<br>
+          <b>提醒：</b>豆瓣对异地 IP 的风控更严，部署到云服务器后建议用 Cookie 登录。
+        </div>
+      </details>
+
+      <button class="ghost" onclick="closeShareModal()">关闭</button>
+    </div>
+  </div>
+
+  <!-- 顶部导航（非首页显示） -->
+  <div class="navbar" id="navbar">
+    <div class="back" onclick="goBack()">‹</div>
+    <div class="title" id="navTitle">豆瓣小组查询</div>
+  </div>
+
+  <!-- ============ 视图1：首页搜索 ============ -->
+  <div class="view active" id="view-index">
+    <div class="hero">
+      <div class="logo">豆</div>
+      <h1>豆瓣小组查询</h1>
+      <p>根据用户 ID，查找 TA 加入的小组和历史发言记录</p>
+    </div>
+
+    <!-- 后端未连接 -->
+    <div class="backend-banner" id="backendBanner" style="display:none">
+      <b>⚠️ 连不上后端</b><br>
+      <span id="backendBannerHint">当前后端地址：<code id="backendBannerApi"></code></span><br>
+      本机使用：打开项目目录 <code>douban-mini/</code> 双击 <code>启动豆瓣查询.bat</code>，
+      会自动打开 <code>http://127.0.0.1:8000/</code>。<br>
+      <div class="bb-set">
+        <input id="apiBaseInput" placeholder="云端后端地址，如 https://xxx.onrender.com">
+        <button onclick="applyApiBase()">连接</button>
+      </div>
+      <a onclick="retryBackend()">↺ 重新检测连接</a>
+      <a onclick="resetApiBase()" style="float:right">恢复默认地址</a>
+    </div>
+
+    <!-- 未登录时的引导卡 -->
+    <div id="loginPrompt" style="display:none">
+      <div class="login-prompt">
+        <h3>登录豆瓣 · 解锁完整功能</h3>
+        <p class="lp-hint">登录后才能看自己加入的小组和完整发言。公开功能不需要登录。</p>
+
+        <div class="lp-section">
+          <span class="lp-tag recommend">推荐</span>
+          <b>一键登录豆瓣（电脑浏览器，最省事）</b>
+          <div class="lp-step">
+            ① 把下面绿按钮<b>拖到浏览器书签栏</b>
+            （没看到书签栏就按 <code>Ctrl+Shift+B</code> 调出来）
+          </div>
+          <a class="lp-bk" id="lpBkBtn" onclick="copyBookmark(event);return false;">📋 一键登录豆瓣</a>
+          <div class="lp-step">
+            ② 电脑浏览器打开 <code>www.douban.com</code> 并登录<br>
+            ③ 点一下书签栏上的「📋 一键登录豆瓣」<br>
+            ④ 看到弹窗「登录成功」就完成，全过程不用粘贴
+          </div>
+        </div>
+
+        <div class="lp-section">
+          <span class="lp-tag normal">简单</span>
+          <b>直接粘贴 Cookie</b>
+          <div class="lp-step">
+            在 <code>www.douban.com</code> 按 <code>Ctrl+Shift+I</code>
+            → <code>Application</code> → <code>Cookies</code> →
+            找到 <code>dbcl2</code> 复制它的值
+          </div>
+          <textarea class="lp-input" id="lpCookieInput" rows="2"
+                    placeholder='粘贴 dbcl2 的值（含引号更好）'></textarea>
+          <div class="lp-row">
+            <label>你的 uid</label>
+            <input class="lp-input" id="lpCookieUid" placeholder="必填，如 281065007">
+          </div>
+          <button class="lp-big-btn" onclick="lpSaveCookie()">验证并登录</button>
+          <div class="lp-status" id="lpCookieStatus"></div>
+        </div>
+
+        <details class="lp-section">
+          <summary><b>填 Bearer Token（需要手机抓包）</b></summary>
+          <div class="lp-step">
+            安卓装 <code>HTTPCanary</code>，iOS 装 <code>Stream</code>。
+            打开豆瓣 App 抓包，找 <code>frodo.douban.com</code> 请求头里的
+            <code>Authorization: Bearer xxxx</code>，把 Bearer 后面那串复制过来。
+          </div>
+          <textarea class="lp-input" id="lpTokenInput" rows="2"
+                    placeholder="Bearer 后面的字符串；也可直接贴整段抓包文本"></textarea>
+          <button class="lp-big-btn" onclick="lpSaveToken()">验证并登录</button>
+          <div class="lp-status" id="lpTokenStatus"></div>
+        </details>
+      </div>
+    </div>
+
+    <div class="me-card" id="meCard">
+      <div class="me-top">
+        <img id="meAvatar" src="" alt="">
+        <div>
+          <div class="me-name" id="meName">—</div>
+          <div class="me-sub" id="meSub"></div>
+        </div>
+      </div>
+      <div class="me-actions">
+        <div onclick="openMyGroups()">我加入的小组</div>
+        <div onclick="openMyPosts()">我的发言记录</div>
+      </div>
+    </div>
+    <div class="search-box">
+      <input id="userIdInput" placeholder="输入：用户 uid / 用户昵称 / 小组名（自动识别）"
+             maxlength="40" autofocus>
+      <button id="searchBtn" onclick="doSearch()">查 询</button>
+      <div class="example" onclick="fillExample()">试试示例用户：55644233 / 试试小组：上海租房</div>
+    </div>
+    <div class="error-msg" id="indexError"></div>
+    <div class="tips">
+      <div class="t-title">说明</div>
+      <div class="t-item">· 智能输入：纯数字当 uid；其他自动搜索用户和小组</div>
+      <div class="t-item">· 任意用户：公开资料、看过的影视书、小组详情/话题/成员 —— 真实数据</div>
+      <div class="t-item">· 你的账号（已配置 token）：加入的小组、完整发言记录 —— 真实数据</div>
+      <div class="t-item">· 他人：可用「反查」指定小组，扫描其话题/评论过滤出 TA 的活动</div>
+      <div class="t-item scan-link" onclick="openScanView()">⚡ <b>全量扫描小组历史</b>：把候选小组的全部历史话题翻完，
+        支持进度、断点续跑、可取消 <span style="color:#2e963a">→ 立即体验</span></div>
+      <div class="t-item scan-link" onclick="openShareModal()">📤 <b>分享给他人使用</b>：生成二维码 / 局域网地址，
+        同一 WiFi 的手机扫码就能用 <span style="color:#2e963a">→ 点这里</span></div>
+    </div>
+    <footer>douban-mini · Web 版 · 仅供学习研究</footer>
+  </div>
+
+  <!-- ============ 视图2：加入的小组 ============ -->
+  <div class="view" id="view-groups">
+    <div id="groupsBody"></div>
+    <footer>douban-mini · 仅供学习研究</footer>
+  </div>
+
+  <!-- ============ 视图3：发言记录 / 小组话题 ============ -->
+  <div class="view" id="view-posts">
+    <div id="postsBody"></div>
+    <footer>douban-mini · 仅供学习研究</footer>
+  </div>
+
+  <!-- ============ 视图4：全量扫描 ============ -->
+  <div class="view" id="view-scan">
+    <div id="scanBody"></div>
+    <footer>douban-mini · 仅供学习研究</footer>
+  </div>
+
+</div>
+
+<script>
+/* ---------- API 地址探测 ----------
+ * 优先级：
+ *   1. URL 参数 ?api=https://xxx      （分享链接里指定，会记住）
+ *   2. 本机浏览器存过的地址（localStorage）
+ *   3. 内置云端后端地址 DEFAULT_CLOUD_API（部署到 Render 后填这里，见 README）
+ *   4. 页面由后端自身服务（端口 8000）→ 同源
+ *   5. 本机默认 http://127.0.0.1:8000
+ * 后端带 CORS 允许所有来源，跨域访问没有问题。
+ */
+const DEFAULT_CLOUD_API = '';   // ← 部署云端后填 https://你的服务.onrender.com
+
+function lsGet(k) { try { return localStorage.getItem(k); } catch (e) { return null; } }
+function lsSet(k, v) { try { localStorage.setItem(k, v); } catch (e) {} }
+function lsDel(k) { try { localStorage.removeItem(k); } catch (e) {} }
+
+function detectApiBase() {
+  const m = location.search.match(/[?&]api=([^&]+)/);
+  if (m) {
+    const v = decodeURIComponent(m[1]).replace(/\/+$/, '');
+    lsSet('douban_api_base', v);      // 记住，之后直接访问不带参数也行
+    return v;
+  }
+  const saved = lsGet('douban_api_base');
+  if (saved) return saved;
+  // file:// 等非 HTTP 方式打开（如直接双击 html 文件）→ 用默认后端
+  if (location.protocol !== 'http:' && location.protocol !== 'https:') {
+    return 'http://127.0.0.1:8000';
+  }
+  const h = location.hostname;
+  if (h === '127.0.0.1' || h === 'localhost') {
+    return location.port === '8000' ? location.origin : 'http://127.0.0.1:8000';
+  }
+  if (location.port === '8000') return location.origin;
+  // 由 GitHub Pages / 其它静态托管打开 → 用内置云端后端（若已配置）
+  return DEFAULT_CLOUD_API || location.origin;
+}
+let API = detectApiBase();
+
+function setApiBase(v) {
+  v = (v || '').trim().replace(/\/+$/, '');
+  if (!v) return false;
+  if (!/^https?:\/\//i.test(v)) {
+    // https 页面不能请求 http 接口（浏览器会拦混合内容），默认补 https
+    v = (location.protocol === 'https:' ? 'https://' : 'http://') + v;
+  }
+  lsSet('douban_api_base', v);
+  API = v;
+  return true;
+}
+function resetApiBase() { lsDel('douban_api_base'); API = detectApiBase(); }
+
+/* ---------- 凭证（云端共享时只存访问者自己的浏览器）----------
+ * 云端后端（Render 等）设了 DOUBAN_CLOUD=1，服务端不保存任何人的凭证；
+ * 登录成功后凭证存在 localStorage，之后每个请求用请求头带过去，
+ * 后端按凭证隔离缓存 —— 多人共用一个网址也不会互相看到账号。
+ */
+function credHeaders() {
+  const h = {};
+  const t = lsGet('douban_token'), c = lsGet('douban_cookie');
+  if (t) h['X-Douban-Token'] = t;
+  if (c) h['X-Douban-Cookie'] = c;
+  return h;
+}
+function saveCred(token, cookie) {
+  if (token) lsSet('douban_token', token); else lsDel('douban_token');
+  if (cookie) lsSet('douban_cookie', cookie); else lsDel('douban_cookie');
+}
+function clearCred() { lsDel('douban_token'); lsDel('douban_cookie'); }
+function hasLocalCred() { return !!(lsGet('douban_token') || lsGet('douban_cookie')); }
+function afterLoginOk(token, cookie) { saveCred(token, cookie); }
+
+let currentUser = null;       // 当前查询的用户
+let selfAccount = null;       // token 对应的本人账号（后端自动识别）
+let viewStack = [];           // 简易返回栈
+let topicsState = { loaded: 0, total: 0 };   // 发言记录翻页状态
+
+const $ = id => document.getElementById(id);
+
+function showView(name, title) {
+  ['index', 'groups', 'posts', 'scan'].forEach(v =>
+    $('view-' + v).classList.toggle('active', v === name));
+  if (name !== 'scan' && scanState.pollTimer) {
+    clearInterval(scanState.pollTimer); scanState.pollTimer = null;
+  }
+  const isIndex = name === 'index';
+  $('navbar').style.display = isIndex ? 'none' : 'flex';
+  $('navTitle').textContent = title || '豆瓣小组查询';
+  if (!isIndex) viewStack.push(name); else viewStack = [];
+  window.scrollTo(0, 0);
+}
+
+function goBack() {
+  viewStack.pop();
+  const prev = viewStack[viewStack.length - 1] || 'index';
+  viewStack.pop();
+  showView(prev, prev === 'groups' ? (currentUser ? currentUser.name + ' 的小组' : 'TA 的小组')
+                                   : '豆瓣小组查询');
+}
+
+function fillExample() {
+  $('userIdInput').value = '55644233';
+  $('indexError').style.display = 'none';
+}
+
+function showError(el, msg) {
+  el.textContent = msg;
+  el.style.display = 'block';
+}
+
+async function api(path) {
+  let r;
+  try {
+    r = await fetch(API + path, { headers: credHeaders() });
+  } catch (e) {
+    throw new Error('无法连接后端（' + API + '）。请确认 FastAPI 服务已启动：' +
+      'cd douban-mini/backend 后运行 uvicorn main:app --port 8000');
+  }
+  const j = await r.json().catch(() => ({}));
+  if (r.ok && j.ok) return j;
+  throw new Error(j.detail || j.message || ('HTTP ' + r.status));
+}
+
+function esc(s) {
+  return String(s == null ? '' : s)
+    .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;');
+}
+
+/* ---------- 数据来源提示条 ---------- */
+function banner(res) {
+  if (res.source === 'mock') {
+    return '<div class="mock-banner"><span class="dot"></span><span>' +
+      esc(res.message || '当前为演示数据，配置 DOUBAN_TOKEN 后为真实数据') + '</span></div>';
+  }
+  if (res.source === 'restricted') {
+    let m = esc(res.message || '该数据无公开接口');
+    if (/登录|token/i.test(res.message || '')) {
+      m += ' <span class="relink" onclick="openTokenModal()">点此更新登录</span>';
+    }
+    return '<div class="info-banner"><div class="ib-title">豆瓣接口限制</div>' + m + '</div>';
+  }
+  return '';
+}
+
+/* ---------- 全量扫描任务 ---------- */
+let scanState = {
+  uid: '', name: '', groups: [], mode: 'posts', maxTopics: 1000,
+  jobs: [], pollTimer: null, expanded: {},
+};
+
+function scanDepthLabel(v) {
+  return { 200: '试跑 200 条/组', 1000: '标准 1000 条/组', 5000: '深度 5000 条/组',
+           0: '全量不限（扫到小组最早一条）' }[v] || v;
+}
+
+async function openScanView() {
+  if (!scanState.uid) {
+    if (currentUser) { scanState.uid = currentUser.id; scanState.name = currentUser.name || ''; }
+    else if (selfAccount) { scanState.uid = selfAccount.uid; scanState.name = selfAccount.name || ''; }
+  }
+  showView('scan', '全量扫描');
+  renderScanView();
+  if (scanState.uid && !scanState.groups.length) await fillMyGroupsForScan();
+  await loadJobs();
+  if (!scanState.pollTimer) {
+    scanState.pollTimer = setInterval(loadJobs, 2500);
+  }
+}
+
+async function fillMyGroupsForScan() {
+  try {
+    const r = await fetch(API + '/api/user/' + scanState.uid + '/groups?count=50', { headers: credHeaders() }).then(r => r.json());
+    if (r.ok && r.data && r.data.groups && r.data.groups.length) {
+      scanState.groups = r.data.groups.map(g => ({ id: String(g.id), name: g.name }));
+      renderScanView();
+    }
+  } catch (e) { /* 静默 */ }
+}
+
+function renderScanView() {
+  const s = scanState;
+  const chips = s.groups.length
+    ? s.groups.map(g => `<span class="sf-chip">${esc(g.name || g.id)}
+        <span class="x" onclick="removeScanGroup('${esc(g.id)}')">×</span></span>`).join('')
+    : '<span style="font-size:12px;color:#999">还没选小组 —— 可点「用我的小组」自动带出，或按名称搜索</span>';
+
+  $('scanBody').innerHTML = `
+    <div class="info-banner"><div class="ib-title">全量扫描是什么</div>
+      把候选小组的<b>全部历史话题</b>一页页翻完（不再只看最近几十条），
+      后台任务运行，带进度、断点续跑、可随时取消。
+      发帖扫描稳定；<b>回帖扫描受豆瓣反爬限制</b>（评论接口频繁返回 1000），会退避重试并如实记录失败数。
+      ${(loginState && loginState.token_status !== 'valid')
+        ? '<br><span style="color:#c2410c">⚠️ 当前未登录：豆瓣只允许匿名翻到每个小组前约 200 条话题，' +
+          '再往后需登录态。要真正翻完整组历史，请先点右上角「登录」。</span>'
+        : ''}
+    </div>
+    <div class="scan-form">
+      <div class="sf-row">
+        <label>目标用户</label>
+        <input id="scanUid" value="${esc(s.uid)}" placeholder="豆瓣 uid" onchange="scanState.uid=this.value.trim()">
+        <button style="width:auto;padding:6px 10px;font-size:12px"
+                onclick="useSelfForScan()">用我的账号</button>
+      </div>
+      <div class="sf-row">
+        <label>小组</label>
+        <input id="scanGroupInput" placeholder="输入小组名称搜索，或直接输小组 id">
+        <button style="width:auto;padding:6px 10px;font-size:12px"
+                onclick="searchGroupForScan()">搜索</button>
+        <button style="width:auto;padding:6px 10px;font-size:12px"
+                onclick="addGroupForScan()">加 id</button>
+      </div>
+      <div class="sf-chips" id="scanChips">${chips}</div>
+      <div class="sf-row" style="margin-top:10px">
+        <label>扫描内容</label>
+        <select onchange="scanState.mode=this.value; updateScanEst()">
+          <option value="posts" ${s.mode === 'posts' ? 'selected' : ''}>只扫发帖（最快最稳）</option>
+          <option value="comments" ${s.mode === 'comments' ? 'selected' : ''}>只扫回帖（易触发反爬）</option>
+          <option value="both" ${s.mode === 'both' ? 'selected' : ''}>发帖 + 回帖</option>
+        </select>
+      </div>
+      <div class="sf-row">
+        <label>深度</label>
+        <select onchange="scanState.maxTopics=parseInt(this.value); updateScanEst()">
+          ${[200, 1000, 5000, 0].map(v =>
+            `<option value="${v}" ${s.maxTopics === v ? 'selected' : ''}>${scanDepthLabel(v)}</option>`).join('')}
+        </select>
+      </div>
+      <div class="sf-est" id="scanEst"></div>
+      <button id="scanStartBtn" onclick="startScan()">启动全量扫描</button>
+    </div>
+    <div id="scanJobs"><div class="list-header">扫描任务</div></div>
+  `;
+  updateScanEst();
+}
+
+function updateScanEst() {
+  const s = scanState;
+  const n = s.groups.length, cap = s.maxTopics || 2000;
+  const pages = Math.ceil(cap / 100) * n;
+  const cReqs = (s.mode === 'posts') ? 0 : pages * Math.ceil(cap / 100);
+  const secs = Math.round((pages + cReqs) * 0.6);
+  $('scanEst').innerHTML = `已选 <b>${n}</b> 个小组 · 预计约 <b>${pages}</b> 次话题请求`
+    + (cReqs ? ` + <b>${cReqs}</b> 次评论请求` : '')
+    + ` · 预计耗时 <b>${secs < 60 ? secs + ' 秒' : Math.round(secs / 60) + ' 分钟'}</b>`
+    + (s.mode !== 'posts' ? '<br><span style="color:#c2410c">回帖模式可能因反爬大幅变慢（每次退避 30~180 秒）</span>' : '');
+}
+
+function useSelfForScan() {
+  if (selfAccount) { scanState.uid = selfAccount.uid; scanState.name = selfAccount.name || ''; }
+  else if (currentUser) { scanState.uid = currentUser.id; scanState.name = currentUser.name || ''; }
+  $('scanUid').value = scanState.uid;
+  fillMyGroupsForScan();
+}
+
+async function searchGroupForScan() {
+  const q = $('scanGroupInput').value.trim();
+  if (!q) return;
+  const r = await fetch(API + '/api/search/group?q=' + encodeURIComponent(q) + '&count=10', { headers: credHeaders() }).then(r => r.json());
+  const gs = (r.data && r.data.groups) || [];
+  if (!gs.length) { alert('没搜到小组：' + q); return; }
+  const pick = gs.length === 1 ? gs[0]
+    : gs[parseInt(prompt(gs.map((g, i) => `${i + 1}. ${g.name}（${g.member_count} 人，id ${g.id}）`).join('\n')
+        + '\n\n输入序号选择：', '1') || '1', 10) - 1];
+  if (pick && !scanState.groups.some(g => g.id === String(pick.id))) {
+    scanState.groups.push({ id: String(pick.id), name: pick.name });
+    renderScanView();
+  }
+}
+
+function addGroupForScan() {
+  const v = ($('scanGroupInput').value || '').trim();
+  if (!v) return;
+  if (!scanState.groups.some(g => g.id === v)) {
+    scanState.groups.push({ id: v, name: v });
+    renderScanView();
+  }
+}
+
+function removeScanGroup(gid) {
+  scanState.groups = scanState.groups.filter(g => g.id !== gid);
+  renderScanView();
+}
+
+async function startScan() {
+  const s = scanState;
+  if (cooldownBlocked()) return;
+  if (!s.uid) { alert('请填写目标用户 uid'); return; }
+  if (!s.groups.length) { alert('请至少选择一个候选小组'); return; }
+  const btn = $('scanStartBtn');
+  btn.disabled = true; btn.textContent = '启动中…';
+  try {
+    const r = await fetch(API + '/api/scan/jobs', {
+      method: 'POST',
+      headers: Object.assign({ 'Content-Type': 'application/json' }, credHeaders()),
+      body: JSON.stringify({
+        user_id: s.uid, user_name: s.name,
+        groups: s.groups.map(g => g.id), mode: s.mode,
+        max_topics_per_group: s.maxTopics,
+      }),
+    });
+    const j = await r.json();
+    if (!j.ok) { alert(j.detail || '启动失败'); btn.disabled = false; btn.textContent = '启动全量扫描'; return; }
+    scanState.expanded[j.job_id] = true;
+    await loadJobs();
+  } catch (e) {
+    alert('无法连接后端：' + e.message);
+  }
+  btn.disabled = false; btn.textContent = '启动全量扫描';
+}
+
+async function loadJobs() {
+  let r;
+  try {
+    r = await fetch(API + '/api/scan/jobs', { headers: credHeaders() }).then(r => r.json());
+  } catch (e) { return; }
+  if (!r.ok) return;
+  renderJobs(r.jobs || []);
+}
+
+function renderJobs(jobs) {
+  const box = $('scanJobs');
+  if (!box) return;
+  if (!jobs.length) {
+    box.innerHTML = '<div class="list-header">扫描任务</div>' +
+      '<div class="info-banner">还没有任务。填好用户和小组后点「启动全量扫描」。</div>';
+    return;
+  }
+  let html = `<div class="list-header">扫描任务（${jobs.length}）</div>`;
+  for (const j of jobs) {
+    const p = j.progress || {};
+    const pct = p.group_total
+      ? Math.min(100, Math.round(p.scanned_topics / p.group_total * 100))
+      : (p.groups_total ? Math.round((p.group_index || 0) / p.groups_total * 100) : 0);
+    const stName = { running: '运行中', done: '完成', canceled: '已取消', error: '出错',
+                     pending: '排队中', paused: '暂停' }[j.status] || j.status;
+    const hits = (j.results_count.posts || 0) + (j.results_count.comments || 0);
+    html += `<div class="job-card">
+      <div class="jc-head">
+        <div class="jc-title">${esc(j.user_name || j.user_id)} · ${
+          { posts: '发帖', comments: '回帖', both: '发帖+回帖' }[j.mode]}</div>
+        <div class="jc-status ${esc(j.status)}">${stName}</div>
+      </div>
+      <div class="jc-progress"><div class="jc-bar" style="width:${pct}%"></div></div>
+      <div class="jc-meta">
+        小组 ${(p.group_index || 0) + 1}/${p.groups_total || j.group_ids.length}
+        · 已扫 ${p.scanned_topics || 0} 条话题${p.group_total ? ' / 共约 ' + p.group_total : ''}
+        · 命中 <b>${j.results_count.posts}</b> 帖 <b>${j.results_count.comments}</b> 回帖
+        ${p.oldest_topic_time ? '· 已翻到 ' + esc(p.oldest_topic_time) : ''}
+        <br>当前：${esc(p.current_group_name || '—')}
+        ${p.current_topic_title ? '· ' + esc(String(p.current_topic_title).slice(0, 18)) : ''}
+        ${p.comment_blocked ? `<br><span style="color:#c2410c">回帖被反爬拦截 ${p.comment_blocked} 条话题</span>` : ''}
+      </div>
+      <div class="jc-actions">
+        <button onclick="toggleJob('${j.id}')">${scanState.expanded[j.id] ? '收起' : '展开结果'}</button>
+        ${j.status === 'running' ? `<button class="danger" onclick="cancelJob('${j.id}')">取消</button>` : ''}
+        <button onclick="delJob('${j.id}')">删除</button>
+      </div>
+      ${hits && scanState.expanded[j.id] ? renderJobHits(j) : ''}
+    </div>`;
+  }
+  box.innerHTML = html;
+}
+
+function renderJobHits(j) {
+  const items = []
+    .concat((j.results.posts || []).map(x => ({ ...x, _k: '帖' })))
+    .concat((j.results.comments || []).map(x => ({ ...x, _k: '回' })))
+    .sort((a, b) => String(b.create_time || '').localeCompare(String(a.create_time || '')));
+  if (!items.length) return '<div class="jc-hits"><div class="hit">本次扫描还没有命中</div></div>';
+  return '<div class="jc-hits">' + items.slice(0, 12).map(x => {
+    const title = x._k === '帖' ? (x.title || '') : (x.text || '').replace(/\s+/g, ' ').slice(0, 60);
+    const url = x._k === '帖' ? x.url : ('https://www.douban.com/group/topic/' + x.topic_id + '/');
+    return `<div class="hit">
+      <span class="hit-time">${esc(x.create_time || '')} · ${esc(x.group_name || '')} · ${x._k}</span><br>
+      <a class="hit-title" href="${esc(url || '#')}" target="_blank">${esc(title || '(无标题)')}</a>
+    </div>`;
+  }).join('') + (items.length > 12 ? `<div class="jc-note">仅显示最近 12 条，共 ${items.length} 条</div>` : '') + '</div>';
+}
+
+function toggleJob(id) {
+  scanState.expanded[id] = !scanState.expanded[id];
+  loadJobs();
+}
+
+async function cancelJob(id) {
+  await fetch(API + '/api/scan/jobs/' + id + '/cancel', { method: 'POST', headers: credHeaders() });
+  loadJobs();
+}
+
+async function delJob(id) {
+  await fetch(API + '/api/scan/jobs/' + id, { method: 'DELETE', headers: credHeaders() });
+  loadJobs();
+}
+
+/* ---------- 登录状态 ---------- */
+async function refreshLoginState() {
+  let h;
+  try {
+    h = await fetch(API + '/api/health', { headers: credHeaders() }).then(r => r.json());
+  } catch (e) {
+    setFab('missing', '未连接');
+    showBackendDown();
+    return null;
+  }
+  loginState = h;
+  hideBackendDown();
+  // 风控冷却优先显示（此时别让用户继续点，越点封得越久）
+  if (applyCooldown(h)) {
+    $('loginPrompt').style.display = 'none';
+    return h;
+  }
+  const st = h.token_status;
+  if (st === 'valid') {
+    setFab('ok', (h.self_uid ? 'uid ' + h.self_uid : '已登录'));
+    $('loginPrompt').style.display = 'none';
+  } else {
+    if (st === 'expired') setFab('warn', '登录失效 · 点此更新');
+    else if (st === 'invalid') setFab('warn', 'token 无效 · 点此更新');
+    else setFab('missing', '未登录');
+    $('loginPrompt').style.display = 'block';
+    // 默认把上次保存的 uid 预填
+    const uidInput = $('lpCookieUid');
+    if (uidInput && !uidInput.value && h.self_uid) uidInput.value = h.self_uid;
+  }
+  return h;
+}
+
+function showBackendDown() {
+  const b = $('backendBanner'); if (b) b.style.display = 'block';
+  const p = $('loginPrompt'); if (p) p.style.display = 'none';
+  const el = $('backendBannerApi'); if (el) el.textContent = API;
+  const inp = $('apiBaseInput'); if (inp && !inp.value) inp.value = API || '';
+}
+function hideBackendDown() {
+  const b = $('backendBanner'); if (b) b.style.display = 'none';
+}
+async function retryBackend() {
+  setFab('missing', '检测中…');
+  await refreshLoginState();
+}
+async function applyApiBase() {
+  const v = $('apiBaseInput').value.trim();
+  if (!setApiBase(v)) { alert('请填写后端地址'); return; }
+  setFab('missing', '连接中…');
+  await refreshLoginState();
+  if (loginState && loginState.ok) {
+    hideBackendDown();
+    alert('已连接到 ' + API);
+    loadMe();
+  } else {
+    alert('仍然连不上 ' + API + '，请检查地址是否正确、服务是否已启动');
+  }
+}
+
+/* ── 登录引导卡：直接提交（不依赖弹窗） ── */
+async function lpSaveCookie() {
+  const cookie = $('lpCookieInput').value.trim();
+  const uid = $('lpCookieUid').value.trim();
+  const st = $('lpCookieStatus');
+  const btn = event.target;
+  if (!cookie) { st.className='lp-status err'; st.textContent='请粘贴 Cookie'; return; }
+  if (!uid) { st.className='lp-status err'; st.textContent='请填 uid'; return; }
+  btn.disabled = true; btn.textContent = '验证中…';
+  st.className = 'lp-status'; st.textContent = '正在请求豆瓣校验…';
+  try {
+    const r = await fetch(API + '/api/config/token', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ cookie, self_uid: uid }) });
+    const j = await r.json();
+    if (j.ok) {
+      afterLoginOk('', cookie);        // 云端模式：凭证只存这个浏览器
+      st.className = 'lp-status ok';
+      st.textContent = '✅ 已登录：' + (j.name || '') + '（uid ' + j.uid + '）' +
+        (j.cloud ? '（凭证只存在你自己的浏览器里）' : '');
+      btn.textContent = '已登录';
+      setTimeout(() => refreshLoginState(), 800);
+    } else {
+      st.className = 'lp-status err';
+      st.textContent = '❌ ' + (j.detail || 'Cookie 无效') +
+        (j.status === 'expired' ? '（请重新复制）' : '');
+      btn.disabled = false; btn.textContent = '重试';
+    }
+  } catch (e) {
+    st.className = 'lp-status err'; st.textContent = '❌ 无法连接后端';
+    btn.disabled = false; btn.textContent = '重试';
+  }
+}
+async function lpSaveToken() {
+  let token = $('lpTokenInput').value.trim();
+  const m = token.match(/Bearer\s+([A-Za-z0-9._\-]+)/i);
+  if (m) token = m[1];
+  else token = token.replace(/^Bearer\s+/i, '').trim();
+  const st = $('lpTokenStatus');
+  const btn = event.target;
+  if (!token) { st.className='lp-status err'; st.textContent='请粘贴 token'; return; }
+  btn.disabled = true; btn.textContent = '验证中…';
+  st.className = 'lp-status'; st.textContent = '正在请求豆瓣校验…';
+  try {
+    const r = await fetch(API + '/api/config/token', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ token }) });
+    const j = await r.json();
+    if (j.ok) {
+      afterLoginOk(token, '');         // 云端模式：凭证只存这个浏览器
+      st.className = 'lp-status ok';
+      st.textContent = '✅ 已登录：' + (j.name || '') + '（uid ' + j.uid + '），' +
+                       (j.topics_total || 0) + ' 条发言' +
+                       (j.cloud ? '（凭证只存在你自己的浏览器里）' : '');
+      btn.textContent = '已登录';
+      setTimeout(() => refreshLoginState(), 800);
+    } else {
+      st.className = 'lp-status err';
+      st.textContent = '❌ ' + (j.detail || 'token 无效') +
+        (j.status === 'expired' ? '（请重新抓取）' : '');
+      btn.disabled = false; btn.textContent = '重试';
+    }
+  } catch (e) {
+    st.className = 'lp-status err'; st.textContent = '❌ 无法连接后端';
+    btn.disabled = false; btn.textContent = '重试';
+  }
+}
+
+/* 豆瓣反爬冷却：右上角显示倒计时，5s 轮询直到恢复 */
+let cooldownTimer = null;
+function applyCooldown(h) {
+  const cd = (h && h.cooldown) || {};
+  if (!cd.cooling || cd.remaining_seconds <= 0) {
+    if (cooldownTimer) { clearInterval(cooldownTimer); cooldownTimer = null; }
+    return false;
+  }
+  setFab('warn', '风控冷却 ' + cd.remaining_seconds + 's');
+  if (!cooldownTimer) {
+    cooldownTimer = setInterval(async () => {
+      const s = await fetch(API + '/api/cooldown').then(r => r.json()).catch(() => null);
+      if (!s) { clearInterval(cooldownTimer); cooldownTimer = null; return; }
+      if (!s.cooling) {
+        clearInterval(cooldownTimer); cooldownTimer = null;
+        refreshLoginState();
+        return;
+      }
+      setFab('warn', '风控冷却 ' + s.remaining_seconds + 's');
+    }, 5000);
+  }
+  return true;
+}
+
+/* 冷却期间禁止启动新的扫描任务 */
+function cooldownBlocked() {
+  const cd = (loginState && loginState.cooldown) || {};
+  if (cd.cooling && cd.remaining_seconds > 0) {
+    alert('豆瓣正在风控冷却中（还剩 ' + cd.remaining_seconds + ' 秒）。\n' +
+          '这时候继续请求会被封更久，请稍等再启动扫描。\n' +
+          '公开数据会自动走备用通道，正常查询不受影响。');
+    return true;
+  }
+  return false;
+}
+
+let loginState = null;   // /api/health 的返回，供扫描页判断是否已登录
+
+function setFab(state, text) {
+  const fab = $('loginFab');
+  fab.classList.toggle('ok', state === 'ok');
+  fab.classList.toggle('warn', state === 'warn');
+  $('loginFabText').textContent = text;
+}
+
+/* 点击小书签按钮时不要跳转（那样只会执行在本页、读不到豆瓣 Cookie），
+   而是把代码复制出来，提示拖到书签栏 / 手动新建书签 */
+function copyBookmark(ev) {
+  ev.preventDefault();
+  const code = $('bkLink').getAttribute('href');
+  const tip = '已复制小书签代码。\n\n' +
+    '用法：书签栏右键 → 添加网页 → 名称随便填 → 网址粘贴刚复制的内容 → 保存。\n' +
+    '然后打开 www.douban.com（已登录），点一下那个书签。\n\n' +
+    '（也可以直接把页面上的绿色按钮拖到书签栏，更省事。）';
+  if (navigator.clipboard && navigator.clipboard.writeText) {
+    navigator.clipboard.writeText(code).then(
+      () => alert(tip),
+      () => prompt('手动复制下面这段，新建书签时粘到「网址」：', code));
+  } else {
+    prompt('手动复制下面这段，新建书签时粘到「网址」：', code);
+  }
+}
+
+/* ---------- 分享给他人 ---------- */
+let shareState = { url: '' };
+
+async function openShareModal() {
+  $('shareModal').classList.add('show');
+  $('shareCopyTip').style.display = 'none';
+  $('shareQr').innerHTML = '<span style="color:#999;font-size:12px">加载中…</span>';
+  $('shareUrl').value = '';
+  try {
+    const j = await fetch(API + '/api/share').then(r => r.json());
+    const url = j.primary_url || j.self_url || location.origin + '/';
+    shareState.url = url;
+    $('shareUrl').value = url;
+    // 云端部署：直接给出公网地址，并说明凭证只存各自浏览器
+    const tip = $('shareCloudTip');
+    if (tip) {
+      if (j.cloud_mode) {
+        tip.style.display = 'block';
+        tip.innerHTML = '☁️ <b>云端共享模式</b>：把这个地址直接发给任何人即可。' +
+          '每个人的豆瓣凭证只存在<b>他自己的浏览器</b>里，互相看不到。';
+      } else {
+        tip.style.display = 'none';
+      }
+    }
+    // 二维码用 SVG（后端生成），手机扫码直接打开
+    $('shareQr').innerHTML =
+      '<img src="' + API + '/api/qrcode.svg?scale=6&text=' + encodeURIComponent(url) +
+      '" alt="访问地址二维码" style="width:178px;height:178px">';
+    if (j.credential_configured) {
+      $('shareWarn').style.display = 'block';
+      $('shareUid').textContent = j.self_uid || (selfAccount && selfAccount.uid) || '本人';
+      $('logoutBtn').style.display = 'block';
+    } else {
+      $('shareWarn').style.display = 'none';
+      $('logoutBtn').style.display = 'none';
+    }
+  } catch (e) {
+    $('shareQr').innerHTML =
+      '<span style="color:#c92a2a;font-size:12px">无法连接后端，请先启动服务</span>';
+    $('shareUrl').value = location.origin + '/';
+  }
+}
+
+function closeShareModal() { $('shareModal').classList.remove('show'); }
+
+function copyShareUrl() {
+  const url = shareState.url || $('shareUrl').value;
+  const done = () => {
+    const t = $('shareCopyTip');
+    t.style.display = 'block';
+    setTimeout(() => { t.style.display = 'none'; }, 2200);
+  };
+  if (navigator.clipboard && navigator.clipboard.writeText) {
+    navigator.clipboard.writeText(url).then(done, () => fallbackCopy(url, done));
+  } else {
+    fallbackCopy(url, done);
+  }
+}
+
+function fallbackCopy(text, done) {
+  const el = $('shareUrl');
+  el.removeAttribute('readonly');
+  el.select();
+  try { document.execCommand('copy'); done(); } catch (e) { prompt('手动复制：', text); }
+  el.setAttribute('readonly', 'readonly');
+}
+
+async function doLogout() {
+  if (!confirm('确定退出登录？会清除保存的豆瓣凭证，之后公开功能仍可用。')) return;
+  try {
+    const j = await fetch(API + '/api/config/logout', { method: 'POST' }).then(r => r.json());
+    clearCred();
+    alert(j.detail || '已退出登录');
+    $('shareWarn').style.display = 'none';
+    $('logoutBtn').style.display = 'none';
+    refreshLoginState();
+  } catch (e) {
+    alert('操作失败：无法连接后端');
+  }
+}
+
+function openTokenModal() {
+  $('tokenModal').classList.add('show');
+  $('tokenStatus').textContent = '';
+  $('tokenStatus').className = 'm-status';
+  $('selfUidInput').value = (selfAccount && selfAccount.uid)
+    || (loginState && loginState.self_uid) || '';
+  $('tokenSaveBtn').disabled = false;
+  $('tokenSaveBtn').textContent = '验证并保存';
+  setTimeout(() => $('tokenInput').focus(), 50);
+}
+
+function closeTokenModal() { $('tokenModal').classList.remove('show'); }
+
+async function saveToken() {
+  // 容错：允许直接粘贴整段请求头 / 抓包文本，自动提取 Bearer 后面那串
+  let token = $('tokenInput').value.trim();
+  const m = token.match(/Bearer\s+([A-Za-z0-9._\-]+)/i);
+  if (m) token = m[1];
+  else token = token.replace(/^Bearer\s+/i, '').trim();
+  const cookie = $('cookieInput').value.trim();
+  const selfUid = $('selfUidInput').value.trim();
+  const st = $('tokenStatus'), btn = $('tokenSaveBtn');
+
+  if (!token && !cookie) {
+    st.className = 'm-status err';
+    st.textContent = '请至少填一种：Bearer token 或 网页 Cookie';
+    return;
+  }
+  if (cookie && !selfUid) {
+    st.className = 'm-status err';
+    st.textContent = '用 Cookie 登录请同时填写你的 uid（Cookie 里 dbcl2 冒号前那串数字）';
+    return;
+  }
+  btn.disabled = true; btn.textContent = '验证中…';
+  st.className = 'm-status'; st.textContent = '正在请求豆瓣校验…';
+  try {
+    const r = await fetch(API + '/api/config/token', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ token: token || null, cookie: cookie || null,
+                             self_uid: selfUid || null }),
+    });
+    const j = await r.json().catch(() => ({}));
+    if (j.ok) {
+      afterLoginOk(token, cookie);    // 云端模式：凭证只存这个浏览器
+      st.className = 'm-status ok';
+      st.textContent = '✅ ' + j.detail +
+        (j.cloud ? '（凭证只存在你自己的浏览器里）' : '');
+      btn.textContent = '登录成功';
+      selfAccount = { uid: j.uid, name: j.name, avatar: '',
+                      topics_total: j.topics_total || null };
+      setTimeout(() => { closeTokenModal(); loadMe(); }, 900);
+    } else {
+      st.className = 'm-status err';
+      st.textContent = '❌ ' + (j.detail || '凭证无效') +
+        (j.status === 'expired' ? '（已过期，建议改用 Cookie 登录）' : '');
+      btn.disabled = false; btn.textContent = '重试';
+    }
+  } catch (e) {
+    st.className = 'm-status err';
+    st.textContent = '❌ 无法连接后端（' + API + '）';
+    btn.disabled = false; btn.textContent = '重试';
+  }
+}
+
+/* ---------- 启动时识别"我自己的账号" ---------- */
+async function loadMe() {
+  await refreshLoginState();
+  let res;
+  try {
+    res = await fetch(API + '/api/me', { headers: credHeaders() }).then(r => r.json());
+  } catch (e) {
+    return;   // 后端未启动时静默（refreshLoginState 已显示 banner）
+  }
+  if (!res) return;
+  // 未登录或 token 已失效 → 让 #loginPrompt 接管，不再用 meCard 重复提示
+  if (!res.ok || !res.data) return;
+  selfAccount = res.data;
+  $('meAvatar').src = selfAccount.avatar || '';
+  $('meName').textContent = selfAccount.name || selfAccount.uid;
+  $('meSub').textContent =
+    'uid ' + selfAccount.uid +
+    ' · 加入 ' + (selfAccount.joined_group_count || 0) + ' 个小组' +
+    ' · 发言 ' + (selfAccount.topics_total == null ? '—' : selfAccount.topics_total) + ' 条' +
+    ' · 已连接豆瓣登录态';
+  $('meCard').style.display = 'block';
+  $('userIdInput').value = selfAccount.uid;
+}
+
+function _selfUser() {
+  return {
+    id: selfAccount.uid,
+    name: selfAccount.name || selfAccount.uid,
+    avatar: selfAccount.avatar,
+    loc: '',
+    followers_count: 0,
+  };
+}
+
+function openMyGroups() {
+  if (!selfAccount) return;
+  currentUser = _selfUser();
+  renderGroups();
+}
+
+function openMyPosts() {
+  if (!selfAccount) return;
+  currentUser = _selfUser();
+  renderUserPosts();
+}
+
+/* ---------- 首页：智能查询（自动识别 uid/用户名/小组名） ---------- */
+async function doSearch() {
+  const raw = $('userIdInput').value.trim();
+  const errEl = $('indexError');
+  errEl.style.display = 'none';
+  if (!raw) { showError(errEl, '请输入：用户 uid / 用户昵称 / 小组名称'); return; }
+
+  // 1) 纯数字 → 直接当 uid
+  if (/^\d{4,12}$/.test(raw)) {
+    await queryUserById(raw);
+    return;
+  }
+
+  // 2) 其他 → 并行搜用户和小组，给出"歧义选择页"
+  const btn = $('searchBtn');
+  btn.disabled = true; btn.textContent = '搜索中…';
+  try {
+    const [uRes, gRes] = await Promise.all([
+      api('/api/search/user?q=' + encodeURIComponent(raw) + '&count=8').catch(() => null),
+      api('/api/search/group?q=' + encodeURIComponent(raw) + '&count=8').catch(() => null),
+    ]);
+    const users = (uRes && uRes.data && uRes.data.users) || [];
+    const groups = (gRes && gRes.data && gRes.data.groups) || [];
+    if (!users.length && !groups.length) {
+      showError(errEl, `没有找到 "${raw}" 对应的用户或小组`);
+      return;
+    }
+    renderAmbiguous(raw, users, groups);
+  } catch (e) {
+    showError(errEl, e.message);
+  } finally {
+    btn.disabled = false; btn.textContent = '查 询';
+  }
+}
+
+async function queryUserById(uid) {
+  const errEl = $('indexError');
+  const btn = $('searchBtn');
+  btn.disabled = true; btn.textContent = '查询中…';
+  try {
+    const res = await api('/api/user/' + encodeURIComponent(uid));
+    currentUser = res.data;
+    renderGroups();
+  } catch (e) {
+    showError(errEl, String(e.message).includes('404') ? '用户不存在，请检查 ID' : e.message);
+  } finally {
+    btn.disabled = false; btn.textContent = '查 询';
+  }
+}
+
+/* 歧义选择页：把搜到的用户和小组都列出来 */
+function renderAmbiguous(q, users, groups) {
+  showView('groups', `搜索 "${q}"`);
+  const box = $('groupsBody');
+  let html = `<div class="info-banner"><div class="ib-title">搜索结果</div>
+    关键词 <b>${esc(q)}</b> 匹配到以下用户和小组，请点击要查看的：</div>`;
+  if (users.length) {
+    html += `<div class="list-header">用户（${users.length}）</div>`;
+    html += users.map(u => `
+      <div class="user-mini" onclick="queryUserById('${esc(u.id)}')">
+        <img src="${esc(u.avatar || '')}" alt="">
+        <div>
+          <div class="um-name">${esc(u.name || u.uid)}</div>
+          <div class="um-sub">uid ${esc(u.uid || u.id)}${u.loc ? ' · ' + esc(u.loc) : ''}</div>
+        </div>
+        <div class="um-go">›</div>
+      </div>`).join('');
+  }
+  if (groups.length) {
+    html += `<div class="list-header">小组（${groups.length}）</div>`;
+    html += groups.map(g => `
+      <div class="group-item" onclick="renderGroupTopics('${esc(g.id)}', '${esc(g.name)}')">
+        <div class="g-icon">${esc((g.name || '?')[0])}</div>
+        <div class="g-body">
+          <div class="g-name">${esc(g.name)}</div>
+          <div class="g-desc">${esc(g.desc || '')}</div>
+          <div class="g-meta">
+            <span>${esc(g.member_count)} 成员</span>
+            <span>· id ${esc(g.id)}</span>
+          </div>
+        </div>
+        <div class="g-arrow">›</div>
+      </div>`).join('');
+  }
+  box.innerHTML = html;
+}
+
+/* ---------- 视图2：加入的小组 ---------- */
+async function renderGroups() {
+  showView('groups', currentUser.name + ' 的小组');
+  const box = $('groupsBody');
+  box.innerHTML = '<div class="empty">加载中…</div>';
+  let res;
+  try {
+    res = await api('/api/user/' + encodeURIComponent(currentUser.id) + '/groups');
+  } catch (e) {
+    box.innerHTML = '<div class="empty">' + esc(e.message) + '</div>';
+    return;
+  }
+  const d = res.data || {};
+  const groups = d.groups || [];
+  const isSelf = selfAccount && String(currentUser.id) === String(selfAccount.uid);
+
+  let html = `
+    <div class="user-card">
+      <img src="${esc(currentUser.avatar)}" alt="">
+      <div class="info">
+        <div class="name">${esc(currentUser.name)}${isSelf ? ' <span style="font-size:11px;color:#2f9e44">（我）</span>' : ''}</div>
+        <div class="meta">${esc(currentUser.loc || '未知地区')} · 粉丝 ${esc(currentUser.followers_count || 0)}</div>
+      </div>
+      <div class="go-posts" onclick="${isSelf ? 'renderUserPosts()' : 'scrollToLookup()'}">
+        ${isSelf ? '发言记录 →' : '反查发言 →'}</div>
+    </div>
+    ${banner(res)}`;
+
+  if (res.source === 'restricted') {
+    html += lookupPanelHtml();
+    html += '<div id="interestsBox"></div>';
+  } else if (!groups.length) {
+    html += '<div class="empty">没有找到加入的小组</div>';
+  } else {
+    html += `<div class="list-header">加入的小组（${esc(d.total || groups.length)}）</div>`;
+    html += groups.map(g => `
+      <div class="group-item" onclick="renderGroupTopics('${esc(g.id)}', '${esc(g.name)}')">
+        <div class="g-icon">${esc((g.name || '?')[0])}</div>
+        <div class="g-body">
+          <div class="g-name">${esc(g.name)}</div>
+          <div class="g-desc">${esc(g.desc || '')}</div>
+          <div class="g-meta">
+            ${g.category ? `<span class="g-tag">${esc(g.category)}</span>` : ''}
+            <span>${esc(g.member_count)} 成员</span>
+            <span>· 创建于 ${esc((g.create_time || '').slice(0, 10))}</span>
+          </div>
+        </div>
+        <div class="g-arrow">›</div>
+      </div>`).join('');
+  }
+  box.innerHTML = html;
+  if (res.source === 'restricted') loadInterests(currentUser.id);
+}
+
+/* ---------- 视图3a：用户发言记录 ---------- */
+const TOPICS_PAGE = 50;
+
+async function renderUserPosts(more) {
+  const box = $('postsBody');
+  const isSelf = selfAccount && String(currentUser.id) === String(selfAccount.uid);
+  if (!more) {
+    showView('posts', currentUser.name + ' 的发言');
+    box.innerHTML = '<div class="empty">加载中…</div>';
+    topicsState = { loaded: 0, total: 0 };
+  }
+  const start = more ? topicsState.loaded : 0;
+  let res;
+  try {
+    res = await api('/api/user/' + encodeURIComponent(currentUser.id) +
+                    '/topics?start=' + start + '&count=' + TOPICS_PAGE);
+  } catch (e) {
+    box.innerHTML = '<div class="empty">' + esc(e.message) + '</div>';
+    return;
+  }
+  const topics = (res.data || {}).topics || [];
+  const total = (res.data || {}).total || topics.length;
+  topicsState.loaded += topics.length;
+  topicsState.total = total;
+
+  let html = `
+    <div class="user-card">
+      <img src="${esc(currentUser.avatar)}" alt="">
+      <div class="info">
+        <div class="name">${esc(currentUser.name)}${isSelf ? ' <span style="font-size:11px;color:#2f9e44">（我）</span>' : ''}</div>
+        <div class="meta">${isSelf ? '完整发言记录（真实数据）' : '历史发言记录'}</div>
+      </div>
+    </div>
+    ${banner(res)}`;
+
+  if (!topics.length && !more) {
+    if (res.source === 'restricted') {
+      html += lookupPanelHtml();
+    } else {
+      html += '<div class="empty">没有找到发言记录</div>';
+    }
+    box.innerHTML = html;
+    return;
+  }
+
+  if (!more) {
+    html += `<div class="list-header">发言（共 ${esc(total)} 条）</div>`;
+  }
+  html += topics.map(t => `
+      <div class="topic-item">
+        <div class="t-top">
+          ${t.group_name ? `<span class="t-group">${esc(t.group_name)}</span>` : '<span></span>'}
+          <span class="t-time">${esc(t.create_time || '')}</span>
+        </div>
+        <div class="t-title">${esc(t.title || '(无标题)')}</div>
+        ${t.abstract ? `<div class="t-abstract">${esc(t.abstract)}</div>` : ''}
+        <div class="t-stats">
+          ${t.comments_count ? `<span>💬 ${esc(t.comments_count)}</span>` : ''}
+          ${t.likes_count ? `<span>👍 ${esc(t.likes_count)}</span>` : ''}
+        </div>
+      </div>`).join('');
+
+  if (topicsState.loaded < topicsState.total) {
+    html += `<div class="load-more" onclick="renderUserPosts(true)">
+      加载更多（已显示 ${topicsState.loaded}/${topicsState.total}）</div>`;
+  }
+  box.innerHTML = html;
+}
+
+/* ---------- 视图3b：小组近期话题（真实数据） ---------- */
+async function renderGroupTopics(groupId, groupName) {
+  showView('posts', groupName);
+  const box = $('postsBody');
+  box.innerHTML = '<div class="empty">加载中…</div>';
+  let res;
+  try {
+    res = await api('/api/group/' + encodeURIComponent(groupId) + '/topics?count=20');
+  } catch (e) {
+    box.innerHTML = '<div class="empty">' + esc(e.message) + '</div>';
+    return;
+  }
+  const topics = (res.data || {}).topics || [];
+
+  let html = `
+    <div class="group-head">
+      <div class="g-name">${esc(groupName)}</div>
+      <div class="g-meta">近期话题（实时数据）</div>
+    </div>`;
+
+  if (!topics.length) {
+    html += '<div class="empty">该小组暂无话题</div>';
+  } else {
+    html += `<div class="list-header">话题（${topics.length}）</div>`;
+    html += topics.map(t => `
+      <div class="topic-item">
+        <div class="t-top">
+          <span></span>
+          <span class="t-time">${esc(t.create_time || '')}</span>
+        </div>
+        <div class="t-title">${esc(t.title || '(无标题)')}</div>
+        ${t.abstract ? `<div class="t-abstract">${esc(t.abstract)}</div>` : ''}
+        <div class="t-stats"><span>作者：<span class="author">${esc(t.author_name || '豆友')}</span></span></div>
+      </div>`).join('');
+  }
+  box.innerHTML = html;
+}
+
+/* ---------- 反查他人发言（含发帖/回帖两种模式） ---------- */
+let lkMode = 'posts';  // 'posts' | 'comments'
+
+function scrollToLookup() {
+  const el = $('lookupPanel');
+  if (el) el.scrollIntoView({ behavior: 'smooth', block: 'start' });
+}
+
+function switchLkMode(m) {
+  lkMode = m;
+  const btnP = $('lkModePosts');
+  const btnC = $('lkModeComments');
+  btnP.className = 'lp-mode' + (m === 'posts' ? ' active' : '');
+  btnC.className = 'lp-mode' + (m === 'comments' ? ' active' : '');
+  $('lkBtn').textContent = m === 'posts' ? '开始反查发帖' : '开始反查回帖';
+  $('lkResult').innerHTML = '';
+}
+
+function lookupPanelHtml() {
+  return `
+    <div class="lookup-panel" id="lookupPanel">
+      <div class="lp-title">反查 TA 的小组活动</div>
+      <div class="lp-desc">
+        豆瓣不提供「他人完整发言记录」接口（已实测 frodo / 移动网页版 / rexxar 全部不可用）。
+        变通方法：给出候选小组 ID，我扫描这些小组的公开内容，过滤出 TA 的活动。
+      </div>
+      <div class="lp-modes">
+        <div id="lkModePosts" class="lp-mode active" onclick="switchLkMode('posts')">📝 发帖</div>
+        <div id="lkModeComments" class="lp-mode" onclick="switchLkMode('comments')">💬 回帖</div>
+      </div>
+      <div class="lp-row">
+        <div>
+          <label>候选小组 ID（逗号分隔，最多 8 个）</label>
+          <input id="lkGroups" placeholder="例如 146409,736218">
+        </div>
+        <div>
+          <label>扫描页数</label>
+          <input id="lkPages" type="number" min="1" max="5" value="2">
+        </div>
+      </div>
+      <button class="lp-btn" id="lkBtn" onclick="doReverseLookup()">开始反查发帖</button>
+      <button class="lp-btn ghost" onclick="toggleGroupSearch()">不知道怎么找小组 ID？按关键词搜索小组</button>
+      <div id="sgBox" style="display:none;margin-top:12px">
+        <div class="lp-row">
+          <div><input id="sgQuery" placeholder="输入小组关键词，如 上海租房"></div>
+          <div style="width:auto"><button class="lp-btn"
+            style="margin-top:0;padding:11px 18px;width:auto" onclick="doSearchGroup()">搜索</button></div>
+        </div>
+        <div id="sgResult"></div>
+      </div>
+      <div id="lkResult"></div>
+      <div class="lp-hint">
+        说明：只能覆盖各小组的「最近内容」（每页 50 条 × 扫描页数），不是全量历史。
+        选 <b>回帖</b> 模式时还会扫话题评论区（评论接口公开可访问）。
+      </div>
+    </div>`;
+}
+
+function toggleGroupSearch() {
+  const b = $('sgBox');
+  b.style.display = (b.style.display === 'none') ? 'block' : 'none';
+}
+
+async function doSearchGroup() {
+  const q = ($('sgQuery').value || '').trim();
+  const box = $('sgResult');
+  if (!q) { box.innerHTML = '<div class="lp-hint">请输入关键词</div>'; return; }
+  box.innerHTML = '<div class="lp-hint">搜索中…</div>';
+  let res;
+  try {
+    res = await api('/api/search/group?q=' + encodeURIComponent(q) + '&count=15');
+  } catch (e) {
+    box.innerHTML = '<div class="lp-hint">' + esc(e.message) + '</div>';
+    return;
+  }
+  const gs = (res.data || {}).groups || [];
+  if (!gs.length) { box.innerHTML = '<div class="lp-hint">没有找到相关小组</div>'; return; }
+  box.innerHTML = '<div style="margin-top:8px">' + gs.map(g => `
+    <div class="sg-item" onclick="pickGroup('${esc(g.id)}')">
+      <div>
+        <div class="sg-name">${esc(g.name)}</div>
+        <div class="sg-meta">${esc(g.member_count || 0)} 成员 · id ${esc(g.id)}</div>
+      </div>
+      <div class="sg-add">+ 加入</div>
+    </div>`).join('') + '</div>';
+}
+
+function pickGroup(gid) {
+  const el = $('lkGroups');
+  const list = (el.value || '').replace(/[，、\s]+/g, ',').split(',').filter(Boolean);
+  if (list.indexOf(gid) < 0) list.push(gid);
+  el.value = list.slice(0, 8).join(',');
+}
+
+async function doReverseLookup() {
+  const box = $('lkResult');
+  const groups = ($('lkGroups').value || '').replace(/[，、\s]+/g, ',').split(',').filter(Boolean);
+  const pages = Math.min(5, Math.max(1, parseInt($('lkPages').value || '2', 10)));
+  if (!groups.length) {
+    box.innerHTML = '<div class="info-banner">请先填写候选小组 ID（可点下方按钮搜索）</div>';
+    return;
+  }
+  const btn = $('lkBtn');
+  const oldText = btn.textContent;
+  btn.disabled = true; btn.textContent = '扫描中，请稍候…';
+  box.innerHTML = '<div class="empty">正在扫描 ' + groups.length + ' 个小组…</div>';
+
+  const endpoint = lkMode === 'comments'
+    ? '/api/user/' + encodeURIComponent(currentUser.id) +
+      '/comments-in-groups?groups=' + encodeURIComponent(groups.join(',')) +
+      '&topic_pages=' + pages + '&comments_per_topic=20'
+    : '/api/user/' + encodeURIComponent(currentUser.id) +
+      '/posts-in-groups?groups=' + encodeURIComponent(groups.join(',')) + '&pages=' + pages;
+
+  let res;
+  try {
+    res = await api(endpoint);
+  } catch (e) {
+    box.innerHTML = '<div class="info-banner">' + esc(e.message) + '</div>';
+    btn.disabled = false; btn.textContent = oldText;
+    return;
+  } finally {
+    btn.disabled = false; btn.textContent = oldText;
+  }
+  const d = res.data || {};
+
+  if (lkMode === 'comments') {
+    const items = d.comments || [];
+    let html = '<div class="info-banner"><div class="ib-title">回帖反查完成</div>' + esc(d.note || '') + '</div>';
+    if (d.warning) {
+      html += `<div class="info-banner" style="background:#fff4e6;color:#c2410c">
+        <div class="ib-title">⚠️ 触发反爬</div>${esc(d.warning)}</div>`;
+    }
+    if (!items.length) {
+      html += '<div class="empty">这批小组里没有找到 TA 的近期回帖<br>' +
+              '<small>可减少候选小组 / 降低扫描页数后重试</small></div>';
+    } else {
+      html += `<div class="list-header">命中 ${items.length} 条回帖</div>`;
+      html += items.map(c => `
+        <div class="topic-item">
+          <div class="t-top">
+            <span class="t-group">${esc(c.group_name)}</span>
+            <span class="t-time">${esc(c.create_time || '')}</span>
+          </div>
+          <div class="t-title">💬 回复《${esc(c.topic_title || '')}》</div>
+          <div class="t-abstract">${esc(c.text || '')}</div>
+          ${c.vote_count ? `<div class="t-stats"><span>👍 ${esc(c.vote_count)}</span></div>` : ''}
+        </div>`).join('');
+    }
+    box.innerHTML = html;
+  } else {
+    const items = d.topics || [];
+    let html = '<div class="info-banner"><div class="ib-title">发帖反查完成</div>' + esc(d.note || '') + '</div>';
+    if (!items.length) {
+      html += '<div class="empty">这批小组里没有找到 TA 的近期发帖<br>' +
+              '<small>可增加候选小组或提高扫描页数</small></div>';
+    } else {
+      html += `<div class="list-header">命中 ${items.length} 条发帖</div>`;
+      html += items.map(t => `
+        <div class="topic-item">
+          <div class="t-top">
+            <span class="t-group">${esc(t.group_name)}</span>
+            <span class="t-time">${esc(t.create_time || '')}</span>
+          </div>
+          <div class="t-title">${esc(t.title || '(无标题)')}</div>
+          ${t.abstract ? `<div class="t-abstract">${esc(t.abstract)}</div>` : ''}
+          <div class="t-stats">
+            ${t.comments_count ? `<span>💬 ${esc(t.comments_count)}</span>` : ''}
+            ${t.likes_count ? `<span>👍 ${esc(t.likes_count)}</span>` : ''}
+          </div>
+        </div>`).join('');
+    }
+    box.innerHTML = html;
+  }
+}
+
+/* ---------- 他人的影视/书足迹（真实数据，公开可查） ---------- */
+function typeLabel(t) {
+  return { movie: '电影', book: '图书', music: '音乐', game: '游戏' }[t] || (t || '');
+}
+
+async function loadInterests(uid) {
+  const box = $('interestsBox');
+  if (!box) return;
+  box.innerHTML = '<div class="empty">加载中…</div>';
+  let res;
+  try {
+    res = await api('/api/user/' + encodeURIComponent(uid) + '/interests?count=20');
+  } catch (e) {
+    box.innerHTML = '';
+    return;
+  }
+  const items = (res.data || {}).interests || [];
+  const total = (res.data || {}).total || items.length;
+  let html = `<div class="list-header">TA 看过的影视 / 书（${esc(total)}）</div>`;
+  if (!items.length) {
+    html += '<div class="empty">TA 没有公开任何标记</div>';
+  } else {
+    html += items.map(x => `
+      <div class="interest-item">
+        <img src="${esc(x.subject_cover || '')}" alt="">
+        <div class="i-body">
+          <div class="i-title">${esc(x.subject_title || '未知')}</div>
+          <div class="i-meta">
+            ${x.subject_year ? esc(x.subject_year) + ' · ' : ''}${esc(typeLabel(x.subject_type))}
+            ${x.rating ? ' · <span class="stars">' + '★'.repeat(x.rating) + '</span>' : ''}
+          </div>
+          ${x.comment ? `<div class="i-comment">${esc(x.comment)}</div>` : ''}
+        </div>
+      </div>`).join('');
+  }
+  box.innerHTML = html;
+}
+
+/* 回车触发查询 */
+$('userIdInput').addEventListener('keydown', e => {
+  if (e.key === 'Enter') doSearch();
+});
+
+/* 启动：识别已配置的豆瓣账号 */
+loadMe();
+
+/* 注册 Service Worker：让手机「添加到主屏幕」后离线也能打开（不影响实时数据） */
+if ('serviceWorker' in navigator && location.protocol.indexOf('http') === 0) {
+  window.addEventListener('load', () => {
+    navigator.serviceWorker.register('sw.js').catch(() => {});
+  });
+}
+</script>
+</body>
+</html>

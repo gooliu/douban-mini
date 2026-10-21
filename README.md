@@ -218,15 +218,28 @@ docker run -d -p 8000:8000 -e DOUBAN_CLOUD=1 douban-mini
 > ⚠️ 豆瓣对境外 IP 风控更严。如果部署后经常出现「机器人程序」提示，
 > 建议改用自己的云服务器（国内 IP）。
 >
-> ℹ️ 登录方式：页面里直接用**豆瓣账号密码**登录（后端调 frodo `auth2/token` 换
-> Bearer token，密码不落盘），或粘贴抓包拿到的 token。
-> **网页 Cookie（dbcl2）登录已移除**——实测 frodo 接口不认 Cookie，怎么复制都会失败。
+> ℹ️ 登录方式（登录弹窗里四选一）：
+> ① **豆瓣账号密码** —— 后端调 frodo `auth2/token` 换 Bearer token，密码不落盘；
+> ② **网页 Cookie（手机可用）** —— 走移动网页通道 m.douban.com/rexxar（豆瓣 H5 靠
+>    Cookie 认登录态；frodo App 接口只认 Bearer，**所以 Cookie 必须走 rexxar 通道**）。
+>    手机上用「一键带回」书签：先登录 m.douban.com，点书签自动跳回本页完成登录；
+> ③ 粘贴抓包拿到的 Bearer token；④ 电脑已登录时给手机发 6 位接力码。
 >
 > 🔧 账号密码登录必须带设备标识（`udid` / `device_id` / `douban_udid`），
 > 否则密码校验通过后豆瓣会返回 `invalid_device_id`。设备号首次自动生成并存在
 > `backend/data/device.json`（可用环境变量 `DOUBAN_DEVICE_ID` 指定），
 > 每次登录保持一致；若被拒会自动换端点、换设备号各重试一次。
-> 仍失败通常是账号开了登录保护：先在手机豆瓣 App 里登录一次再回来重试。
+> 仍失败通常是账号开了登录保护：先在手机豆瓣 App 里登录一次再回来重试，
+> 或改用 Cookie / 接力方式。
+>
+> ⚠️ 实测记录（2026-10-21）：`accounts.douban.com/j/mobile/login/basic`
+> 服务器直连一律返回 `captcha_required`（腾讯验证码），所以「账号密码换网页
+> Cookie」这条路也堵死了；frodo apikey 走 OAuth 授权码也不行（任何 redirect_uri
+> 都报 `redirect_uri_mismatch`）。能用的只有上面四条。
+
+> 📚 **补充记录库**：主页入口可查看**所有人**手动补充过的 ID 记录，
+> 支持按豆瓣 ID（纯数字）或关键词（正文/标题/网址/标签）搜索；
+> 接口 `GET /api/notes-library?q=&limit=`，列表里不含截图 base64（只有标记）。
 
 ## 环境变量
 

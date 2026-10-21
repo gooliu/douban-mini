@@ -554,6 +554,7 @@
         <button type="button" id="tab-pwd" class="active" onclick="switchLoginTab('pwd')">账号密码</button>
         <button type="button" id="tab-token" onclick="switchLoginTab('token')">粘贴 token</button>
         <button type="button" id="tab-handoff" onclick="switchLoginTab('handoff')">手机接力</button>
+        <button type="button" id="tab-cookie" onclick="switchLoginTab('cookie')">网页 Cookie</button>
       </div>
 
       <div class="m-pane active" id="pane-pwd">
@@ -603,9 +604,36 @@
         <p class="m-tip small">接力码 5 分钟内有效、只能用一次。</p>
       </div>
 
+      <div class="m-pane" id="pane-cookie">
+        <p class="m-tip"><b>手机浏览器可用</b>：豆瓣 H5（m.douban.com）靠 Cookie 记登录态，
+          把它带回来就能用。<b>不需要抓包</b>。</p>
+        <div class="m-sub2">① 先复制这个「一键带回」书签</div>
+        <button class="m-primary" id="cookieBmBtn" onclick="copyCookieBookmark()">复制一键登录书签</button>
+        <div class="m-status" id="cookieBmStatus"></div>
+        <div class="m-sub2">② 手机浏览器打开 m.douban.com 登录豆瓣</div>
+        <div class="m-sub2">③ 点刚才保存的书签 → 自动跳回本页并登录</div>
+        <details>
+          <summary>书签怎么用？（iOS / 安卓）</summary>
+          <ol>
+            <li>点上面按钮复制一段以 <code>javascript:</code> 开头的内容。</li>
+            <li>手机浏览器新建一个书签，名称随便（比如「带回豆瓣」），
+                网址<b>粘贴</b>刚才复制的内容（iOS Safari：书签 → 编辑 → 网址）。</li>
+            <li>在已登录的豆瓣页面点这个书签，就会跳回本页并完成登录。</li>
+          </ol>
+        </details>
+        <div class="m-sub2">或者：手动粘贴 Cookie</div>
+        <textarea id="cookieInput" spellcheck="false"
+                  placeholder='粘贴整段 Cookie，需要包含 dbcl2="..."'></textarea>
+        <div class="m-status" id="cookieStatus"></div>
+        <button class="m-primary" id="cookieSaveBtn" onclick="saveCookie()">验证并登录</button>
+        <p class="m-tip small">⚠️ 必须含 <code>dbcl2</code>（豆瓣的登录标识）；
+          无痕窗口 / 另一浏览器的 Cookie 无效。</p>
+      </div>
+
       <button class="ghost" onclick="closeTokenModal()">取消</button>
-      <p class="m-tip small" id="cookieDeadTip">ℹ️ 旧的「Cookie 登录」已移除：实测豆瓣 App 接口不认网页 Cookie，
-        怎么复制都会失败。</p>
+      <p class="m-tip small" id="cookieDeadTip">ℹ️ 说明：豆瓣 App 接口只认 Bearer token，
+        所以 Cookie 走的是<b>移动网页通道</b>（m.douban.com）。加密的是你自己的登录态，
+        只存在你这个浏览器里。</p>
     </div>
   </div>
 
@@ -837,6 +865,8 @@
       <div class="t-item">· 他人：可用「反查」指定小组，扫描其话题/评论过滤出 TA 的活动</div>
       <div class="t-item scan-link" onclick="openScanView()">⚡ <b>全量扫描小组历史</b>：把候选小组的全部历史话题翻完，
         支持进度、断点续跑、可取消 <span style="color:#2e963a">→ 立即体验</span></div>
+      <div class="t-item scan-link" onclick="openNotesLibrary()">📚 <b>补充记录库</b>：所有用户手动补充过的 ID 记录，
+        支持按 ID / 关键词搜索 <span style="color:#2e963a">→ 点这里</span></div>
       <div class="t-item scan-link" onclick="openShareModal()">📤 <b>分享给他人使用</b>：生成二维码 / 局域网地址，
         同一 WiFi 的手机扫码就能用 <span style="color:#2e963a">→ 点这里</span></div>
     </div>
@@ -858,6 +888,12 @@
   <!-- ============ 视图4：全量扫描 ============ -->
   <div class="view" id="view-scan">
     <div id="scanBody"></div>
+    <footer>douban-mini · 仅供学习研究</footer>
+  </div>
+
+  <!-- ============ 视图5：补充记录库（所有人补充过的 ID 记录）============ -->
+  <div class="view" id="view-notes">
+    <div id="notesLibBody"></div>
     <footer>douban-mini · 仅供学习研究</footer>
   </div>
 
@@ -1028,7 +1064,7 @@ let topicsState = { loaded: 0, total: 0 };   // 发言记录翻页状态
 const $ = id => document.getElementById(id);
 
 function showView(name, title) {
-  ['index', 'groups', 'posts', 'scan'].forEach(v =>
+  ['index', 'groups', 'posts', 'scan', 'notes'].forEach(v =>
     $('view-' + v).classList.toggle('active', v === name));
   if (name !== 'scan' && scanState.pollTimer) {
     clearInterval(scanState.pollTimer); scanState.pollTimer = null;
@@ -1644,7 +1680,7 @@ let loginTab = 'pwd';
 
 function switchLoginTab(name) {
   loginTab = name || 'pwd';
-  ['pwd', 'token', 'handoff'].forEach(k => {
+  ['pwd', 'token', 'handoff', 'cookie'].forEach(k => {
     const t = $('tab-' + k), p = $('pane-' + k);
     if (t) t.classList.toggle('active', k === loginTab);
     if (p) p.classList.toggle('active', k === loginTab);
@@ -1654,7 +1690,7 @@ function switchLoginTab(name) {
 
 function openTokenModal(tab) {
   $('tokenModal').classList.add('show');
-  ['pwdStatus', 'tokenStatus', 'hoStatus'].forEach(id => {
+  ['pwdStatus', 'tokenStatus', 'hoStatus', 'cookieStatus', 'cookieBmStatus'].forEach(id => {
     const el = $(id);
     if (el) { el.textContent = ''; el.className = 'm-status'; }
   });
@@ -1712,6 +1748,82 @@ async function loginByPassword() {
   } catch (e) {
     st.className = 'm-status err';
     st.textContent = '❌ 连不上后端（' + API + '）';
+    btn.disabled = false; btn.textContent = '重试';
+  }
+}
+
+/* ---------- 网页 Cookie 登录（手机浏览器可用，走豆瓣 H5 通道）---------- */
+function normalizeCookie(raw) {
+  let c = (raw || '').trim();
+  c = c.replace(/^\s*cookie\s*[:=]\s*/i, '');           // 粘成了请求头
+  c = c.replace(/^\s*document\.cookie\s*[:=]\s*/i, ''); // 粘成了 JS 表达式
+  c = c.replace(/^["']+|["']+$/g, '');
+  return c.replace(/\s*\n\s*/g, ' ').trim();
+}
+
+function cookieBookmarkCode() {
+  const u = new URL(location.href);
+  u.searchParams.delete('cred');
+  u.searchParams.delete('ck');
+  const base = u.toString();
+  const target = base + (base.indexOf('?') >= 0 ? '&' : '?') + 'ck=';
+  return "javascript:(function(){try{var c=document.cookie||'';" +
+         "if(c.indexOf('dbcl2')<0){alert('没读到登录标识 dbcl2：请先在这个浏览器登录 m.douban.com，再点书签');return;}" +
+         "location.href=" + JSON.stringify(target) + "+encodeURIComponent(c);}catch(e){alert('读取失败：'+e)}})()";
+}
+
+async function copyCookieBookmark() {
+  const code = cookieBookmarkCode();
+  const st = $('cookieBmStatus');
+  try {
+    await navigator.clipboard.writeText(code);
+    st.className = 'm-status ok';
+    st.textContent = '✅ 已复制。手机浏览器新建书签 → 网址粘贴它 → 在豆瓣页面点书签即可';
+  } catch (e) {
+    st.className = 'm-status err';
+    st.textContent = '浏览器不让自动复制，已放到下面的输入框，请手动全选复制：';
+    const ta = $('cookieInput');
+    if (ta) { ta.value = code; ta.focus(); ta.select(); }
+  }
+}
+
+async function saveCookie() {
+  const raw = normalizeCookie($('cookieInput').value);
+  const st = $('cookieStatus'), btn = $('cookieSaveBtn');
+  if (!raw) {
+    st.className = 'm-status err';
+    st.textContent = '请先粘贴 Cookie（或在豆瓣页面用书签一键带回）';
+    return;
+  }
+  if (!/dbcl2/i.test(raw)) {
+    st.className = 'm-status err';
+    st.textContent = '❌ 里面没有 dbcl2（豆瓣的登录标识），请先登录 m.douban.com 再复制';
+    return;
+  }
+  btn.disabled = true; btn.textContent = '验证中…';
+  st.className = 'm-status'; st.textContent = '正在请求豆瓣校验…';
+  try {
+    const r = await fetch(API + '/api/config/token', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ cookie: raw }),
+    });
+    const j = await r.json().catch(() => ({}));
+    if (j.ok) {
+      afterLoginOk(j.token || '', j.cookie || raw);
+      selfAccount = { uid: j.uid, name: j.name, avatar: '' };
+      st.className = 'm-status ok';
+      st.textContent = '✅ ' + (j.detail || '登录成功')
+                     + (j.cloud ? '（凭证只存在你自己的浏览器里）' : '');
+      btn.textContent = '登录成功';
+      setTimeout(async () => { closeTokenModal(); await refreshLoginState(); loadMe(); }, 900);
+    } else {
+      st.className = 'm-status err';
+      st.textContent = '❌ ' + (j.detail || 'Cookie 无效');
+      btn.disabled = false; btn.textContent = '重试';
+    }
+  } catch (e) {
+    st.className = 'm-status err';
+    st.textContent = '❌ 无法连接后端（' + API + '）';
     btn.disabled = false; btn.textContent = '重试';
   }
 }
@@ -2345,6 +2457,113 @@ function notesHtml() {
       : '💾 存在后端 backend/data/notes.json —— 连同一个后端的其他人查这个 ID 也能看到这些补充，' +
         '反之你也会看到别人补的线索。每条都标了「我补充的 / 他人补充」'}</div>`;
   return h;
+}
+
+/* ---------- 补充记录库：所有人补充过的 ID 记录，支持按 ID / 关键词搜索 ---------- */
+let notesLibQ = '';
+
+async function openNotesLibrary(q) {
+  notesLibQ = (q == null ? '' : String(q).trim());
+  showView('notes', '补充记录库');
+  await loadNotesLibrary();
+}
+
+async function loadNotesLibrary() {
+  const box = $('notesLibBody');
+  if (!box) return;
+  box.innerHTML = '<div class="note-sec-title">📚 补充记录库</div>'
+    + '<div class="note-item"><div class="note-text">正在加载…</div></div>';
+  let j = null;
+  try {
+    const r = await fetch(API + '/api/notes-library?q=' + encodeURIComponent(notesLibQ)
+                          + '&limit=100', { headers: credHeaders() });
+    j = await r.json();
+  } catch (e) { j = null; }
+  if (!j || !j.ok) {
+    box.innerHTML = '<div class="note-sec-title">📚 补充记录库</div>'
+      + '<div class="note-item"><div class="note-text" style="color:#c92a2a">'
+      + '读不到记录库：连不上后端（' + esc(API) + '）</div></div>';
+    return;
+  }
+  box.innerHTML = notesLibHtml(j.data || {});
+  const inp = $('notesLibInput');
+  if (inp) inp.value = notesLibQ;
+}
+
+function notesLibHtml(d) {
+  const users = d.users || [];
+  let h = '<div class="note-sec-title">📚 补充记录库'
+    + '<span class="cnt">' + (d.total_users || 0) + ' 个 ID · '
+    + (d.total_items || 0) + ' 条记录</span></div>'
+    + '<div class="search-box" style="margin:0 0 12px">'
+    + '<input id="notesLibInput" placeholder="输入豆瓣 ID 或关键词（如 62914960 / 定金）"'
+    + ' maxlength="40" onkeydown="if(event.key===\'Enter\')doNotesLibSearch()">'
+    + '<button onclick="doNotesLibSearch()">搜 索</button></div>';
+  if (notesLibQ) {
+    h += '<div class="note-item"><div class="note-text">搜索「' + esc(notesLibQ) + '」：命中 '
+      + (d.shown || 0) + ' 个 ID'
+      + '<span class="relink" onclick="openNotesLibrary(\'\')" style="margin-left:8px">清空搜索</span>'
+      + '</div></div>';
+  }
+  if (!users.length) {
+    h += '<div class="note-item"><div class="note-text" style="color:#8a7c55">'
+      + '还没有' + (notesLibQ ? '匹配的' : '') + '记录。查某个 ID 时可以在页面上「➕ 补充记录」，'
+      + '补充的帖子网址 / 截图 / 关键词会进到这里，其他人查同一个 ID 也能看到。</div></div>';
+    return h;
+  }
+  return h + users.map(libUserHtml).join('');
+}
+
+function libUserHtml(u) {
+  const items = u.items || [];
+  const shown = items.slice(0, 3);
+  const rest = items.length - shown.length;
+  return '<div class="note-item">'
+    + '<div class="note-head">'
+    + '<span class="note-badge kind">ID ' + esc(u.uid) + '</span>'
+    + (u.name ? '<span class="note-badge">' + esc(u.name) + '</span>' : '')
+    + '<span class="note-badge">' + (u.total || 0) + ' 条</span>'
+    + '<span class="note-time">' + esc(u.updated_at || '') + '</span>'
+    + '</div>'
+    + shown.map(libItemHtml).join('')
+    + (rest > 0 ? '<div class="note-text" style="color:#8a7c55">…还有 ' + rest
+                  + ' 条，点「查这个人」看全部</div>' : '')
+    + '<div class="note-acts"><span onclick="gotoUid(\'' + esc(u.uid) + '\')">🔍 查这个人</span></div>'
+    + '</div>';
+}
+
+function libItemHtml(n) {
+  const link = n.url
+    ? '<a class="note-link" href="' + esc(n.url) + '" target="_blank" rel="noopener">🔗 打开原帖</a>'
+    : '';
+  const mine = n.by && n.by === noteMyTag();
+  const byTip = n.by
+    ? '<span class="note-badge ' + (mine ? 'mine' : 'other') + '">'
+      + (mine ? '我补充的' : '他人补充 ' + esc(n.by)) + '</span>'
+    : '';
+  return '<div class="note-item" style="margin:6px 0;background:#fdfcf7">'
+    + '<div class="note-head">'
+    + '<span class="note-badge kind">' + (NOTE_KIND_LABEL[n.kind] || '✍️ 手写') + '</span>'
+    + byTip
+    + '<span class="note-time">' + esc(n.created_at || '') + '</span>'
+    + '</div>'
+    + (n.title ? '<div class="note-title">' + esc(n.title) + '</div>' : '')
+    + (n.text ? '<div class="note-text">' + esc(n.text) + '</div>' : '')
+    + (n.has_image ? '<div class="note-text" style="color:#8a7c55">🖼 含截图（点「查这个人」查看）</div>' : '')
+    + link
+    + '</div>';
+}
+
+function doNotesLibSearch() {
+  const el = $('notesLibInput');
+  openNotesLibrary(el ? el.value : '');
+}
+
+async function gotoUid(uid) {
+  const inp = $('userIdInput');
+  if (inp) inp.value = String(uid || '');
+  showView('index', '');
+  await doSearch();
 }
 
 async function mountNotes(containerId, uid, name) {

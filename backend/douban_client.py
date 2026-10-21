@@ -343,6 +343,30 @@ class DoubanClient:
                 friendly = raw or f"登录失败（HTTP {last_status}）"
         raise DoubanError(code if isinstance(code, int) else -1, friendly)
 
+    async def check_cookie(self) -> dict | None:
+        """验证网页 Cookie 是否真的登录着豆瓣（走移动网页通道）
+
+        判据：rexxar `/rexxar/api/v2/user/me` 未登录时返回**占位账号**
+        （id=1048835 / uid="me" / name="xingdiannao"），登录后才是真实 uid。
+
+        返回 {uid, name} 表示 Cookie 有效；None 表示没登录 / 通道不通。
+        """
+        if not self.cookie:
+            return None
+        if "dbcl2" not in self.cookie.lower():
+            # 没有登录标识，必然是登录态不完整
+            return None
+        try:
+            j = await self._request_rexxar("/api/v2/user/me", None)
+        except DoubanError:
+            return None
+        uid = str(j.get("id") or "").strip()
+        uname = str(j.get("uid") or "").strip()
+        if (not uid or uid == "1048835" or uname == "me"
+                or str(j.get("name") or "") == "xingdiannao"):
+            return None
+        return {"uid": uid, "name": str(j.get("name") or "").strip()}
+
     async def check_token(self) -> dict:
         """检测当前登录凭证是否有效，返回 {valid, code, msg, uid, name, via}
 
@@ -390,33 +414,20 @@ class DoubanClient:
                         pass
                 return out
 
-        # ---- Cookie 兜底 ----
+        # ---- Cookie（走移动网页通道 rexxar，这是唯一认 Cookie 的入口）----
         if self.cookie:
-            uid = os.getenv("DOUBAN_SELF_UID", "").strip() or self._self_uid
-            if not uid:
-                return {"valid": False, "code": 0, "msg": "已配置 Cookie，但还不知道你的 uid",
-                        "hint": "请在网页「登录」弹窗里同时填写 uid（如 281065007）"}
-            try:
-                g = await self.get_joined_groups(uid, 0, 1)
-            except DoubanError as e:
-                hint = {
-                    103: "Cookie 登录失效：豆瓣不认这个 Cookie（可能已登出或需要复制完整的 dbcl2）",
-                    1000: (f"豆瓣要求登录后才能查看：{e.msg}"
-                           if e.need_login else
-                           "豆瓣判定为机器人程序（反爬），请稍后重试"),
-                }.get(e.code, e.msg)
-                return {"valid": False, "code": e.code, "msg": e.msg,
-                        "need_login": e.need_login, "hint": hint}
-            self._self_uid = str(uid)
+            ck = await self.check_cookie()
+            if not ck:
+                return {"valid": False, "code": 103, "msg": "cookie_invalid",
+                        "need_login": True,
+                        "hint": "豆瓣没认这个 Cookie：① 可能复制时没登录 m.douban.com；"
+                                "② 只复制了一部分（必须含 dbcl2）；"
+                                "③ 无痕窗口 / 另一个浏览器的 Cookie 不算。"
+                                "请重新用手机浏览器打开 m.douban.com 登录后，再用书签一键带回"}
+            self._self_uid = ck["uid"]
             self._self_uid_ts = time.time()
-            out = {"valid": True, "code": 0, "msg": "Cookie 登录有效", "via": "cookie",
-                   "uid": str(uid), "groups_total": g.get("total", 0)}
-            try:
-                u = await self.get_user(str(uid))
-                out["name"] = u.get("name")
-            except DoubanError:
-                pass
-            return out
+            return {"valid": True, "code": 0, "msg": "Cookie 登录有效", "via": "cookie",
+                    "uid": ck["uid"], "name": ck["name"]}
 
         return {"valid": False, "code": 0, "msg": "未配置任何登录凭证"}
 
@@ -461,6 +472,17 @@ class DoubanClient:
         hit = self._cache.get(cache_key)
         if hit and hit.expire_at > time.time():
             return hit.data
+
+        # 只有 Cookie、没有 Bearer token → 直接走移动网页通道
+        # frodo 不认 Cookie（实测），硬走只会拿到占位账号 / need_permission
+        if self.cookie and not self.token and allow_rexxar:
+            try:
+                data = await self._request_rexxar(full_path, params, need_auth)
+                self.last_via = "rexxar"
+                self._cache[cache_key] = _CacheItem(data, time.time() + self.cache_ttl)
+                return data
+            except DoubanError as e:
+                raise DoubanError(e.code, e.msg, e.need_login)
 
         # 冷却中：公开接口直接走备用通道，别再撞 frodo
         if not need_auth and self.cooldown_remaining() > 0 and allow_rexxar:
@@ -552,16 +574,25 @@ class DoubanClient:
                    f"请勿连续点击；公开数据会自动改用备用通道")
         raise DoubanError(code, msg)
 
-    async def _request_rexxar(self, full_path: str, params: dict | None) -> Any:
-        """备用通道：m.douban.com/rexxar（匿名可用，不需签名）
+    async def _request_rexxar(self, full_path: str, params: dict | None,
+                              need_auth: bool = False) -> Any:
+        """移动网页通道：m.douban.com/rexxar（匿名可用，不需签名）
 
         full_path 形如 /api/v2/group/{gid}/topics → /rexxar/api/v2/group/{gid}/topics
+
+        ⚠️ 这是**唯一认 Cookie 的通道**：豆瓣 H5 页面靠 Cookie 维持登录态，
+        而 frodo（App 接口）只认 Bearer token，带 Cookie 一律回落占位账号。
+        所以「手机复制 Cookie 登录」必须走这里。
         """
         http = await self._get_http()
+        headers = {"User-Agent": BROWSER_UA, "Referer": "https://m.douban.com/",
+                   "Accept": "application/json, text/plain, */*"}
+        if self.cookie:
+            headers["Cookie"] = self.cookie
+        if need_auth and self.token:
+            headers["Authorization"] = f"Bearer {self.token}"
         resp = await http.get(
-            REXXAR_HOST + "/rexxar" + full_path, params=params or {},
-            headers={"User-Agent": BROWSER_UA, "Referer": "https://m.douban.com/",
-                     "Accept": "application/json, text/plain, */*"})
+            REXXAR_HOST + "/rexxar" + full_path, params=params or {}, headers=headers)
         if resp.status_code == 200:
             try:
                 return resp.json()
@@ -611,10 +642,17 @@ class DoubanClient:
         env = os.getenv("DOUBAN_SELF_UID", "").strip()
         if env and not getattr(self, "_visitor", False):
             return env
-        if not self.token:
+        if not self.token and not self.cookie:
             return None
         if self._self_uid and time.time() - self._self_uid_ts < 3600:
             return self._self_uid
+        if not self.token and self.cookie:      # 纯 Cookie 登录：走移动网页通道认人
+            ck = await self.check_cookie()
+            if ck:
+                self._self_uid = ck["uid"]
+                self._self_uid_ts = time.time()
+                return self._self_uid
+            return None
         try:
             posted = await self.get_posted_topics(0, 1)
         except DoubanError:

@@ -243,6 +243,65 @@ def toggle_pin(scope: str, uid: str, item_id: str) -> dict:
         return _shape(bucket, uid)
 
 
+def library(scope: str, q: str = "", limit: int = 100) -> dict:
+    """全部补充记录的索引（给「补充记录库」页面用）
+
+    q 为空 → 列出所有有记录的 uid（按最近更新排序）；
+    q 为纯数字 → 按 uid 包含匹配（查某个 / 某一批 id）；
+    q 为其它 → 在正文 / 标题 / 网址 / 标签 / 小组名里做关键词匹配。
+
+    注意：列表里会**剥掉截图 base64**（只留 has_image 标记），
+    否则一个带图记录就能让响应撑到几 MB。
+    """
+    q = (q or "").strip()
+    with _lock:
+        data = _read_all()
+        users = (data.get("scopes", {}).get(scope, {}) or {}).get("users", {})
+
+    def hit(item: dict, low: str) -> bool:
+        hay = " ".join([str(item.get("text") or ""), str(item.get("title") or ""),
+                        str(item.get("url") or ""), str(item.get("group_name") or ""),
+                        " ".join(item.get("tags") or [])])
+        return low in hay.lower()
+
+    rows = []
+    total_items = 0
+    users_with_items = 0
+    for uid, bucket in users.items():
+        items = list(bucket.get("items") or [])
+        if not items:
+            continue
+        users_with_items += 1
+        total_items += len(items)
+        if not q:
+            picked = items
+        elif q.isdigit():
+            picked = items if q in str(uid) else []
+        else:
+            picked = [x for x in items if hit(x, q.lower())]
+        if not picked:
+            continue
+        slim = []
+        for x in picked:
+            y = dict(x)
+            if y.get("image"):
+                y["image"] = ""
+                y["has_image"] = True
+            slim.append(y)
+        rows.append({
+            "uid": str(uid),
+            "name": bucket.get("name") or "",
+            "total": len(items),
+            "matched": len(slim),
+            "updated_at": bucket.get("updated_at") or "",
+            "items": sorted(slim, key=lambda x: x.get("created_at") or "", reverse=True),
+        })
+
+    rows.sort(key=lambda r: (r.get("updated_at") or "", r.get("uid") or ""), reverse=True)
+    return {"total_users": users_with_items, "total_items": total_items, "shown": len(rows),
+            "query": q, "users": rows[:max(1, min(int(limit or 100), 500))]}
+
+
 def export_all(scope: str) -> dict:
     with _lock:
         data = _read_all()

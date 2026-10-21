@@ -372,13 +372,11 @@ async def _apply_credential(token: str, cookie: str, self_uid: str = "",
     cookie = (cookie or "").strip()
     if not token and not cookie:
         return {"ok": False, "status": "empty", "detail": "请先登录（豆瓣账号密码 / token）"}
-    if not token and cookie:
-        # 实测：frodo 接口不认 Cookie（带不带 dbcl2 返回完全一样），
-        # 所以 Cookie 登录永远是失败。直接说清楚，别再让用户白折腾。
-        return {"ok": False, "status": "cookie_unsupported",
-                "detail": "豆瓣的 App 接口只认 Bearer token，不接受网页 Cookie"
-                          "（已实测），所以 Cookie 登录一定失败。"
-                          "请改用「账号密码登录」，或在「粘贴 token」里填 Bearer token。"}
+    if not token and cookie and "dbcl2" not in cookie.lower():
+        # 登录标识都没有，不用去问豆瓣了（省一次请求，也避免给出误导性提示）
+        return {"ok": False, "status": "cookie_incomplete",
+                "detail": "这段内容里没有 dbcl2（豆瓣的登录标识），肯定不是登录状态的 Cookie。"
+                          "请先在手机浏览器打开 m.douban.com 登录，再用书签一键带回。"}
 
     # 用临时凭证视图校验，绝不污染全局单例（云端多人共享时尤其重要）
     probe = client.scoped(token, cookie)
@@ -394,8 +392,7 @@ async def _apply_credential(token: str, cookie: str, self_uid: str = "",
         return {"ok": False, "status": "expired" if chk.get("code") == 103 else "invalid",
                 "code": chk.get("code"), "detail": chk.get("hint") or chk.get("msg", "凭证无效")}
 
-    extra = (f"，{chk.get('topics_total', 0)} 条发言" if chk.get("via") == "token"
-             else f"，{chk.get('groups_total', 0)} 个小组")
+    extra = (f"，{chk.get('topics_total', 0)} 条发言" if chk.get("via") == "token" else "")
     detail = f"登录成功（{'token' if chk.get('via') == 'token' else 'Cookie'}）：" \
              f"{chk.get('name') or ''}（uid {chk.get('uid')}）{extra}"
 
@@ -405,8 +402,8 @@ async def _apply_credential(token: str, cookie: str, self_uid: str = "",
         return {"ok": True, "status": "valid", "uid": chk.get("uid"),
                 "name": chk.get("name"), "via": chk.get("via"),
                 "saved": False, "cloud": True, "detail": detail,
-                # 云模式凭证必须留在访问者浏览器里，所以要把 token 回传一次
-                "token": token}
+                # 云模式凭证必须留在访问者浏览器里，所以要把凭证回传一次
+                "token": token, "cookie": cookie}
 
     client.set_token(token)          # 只给 cookie 时会清空 token，自动走 Cookie 分支
     client.set_cookie(cookie)
@@ -1116,6 +1113,16 @@ async def pin_note(body: dict, user_id: str = Path(...)):
     """置顶 / 取消置顶一条补充记录"""
     item_id = str(body.get("item_id") or "")
     return Resp(ok=True, source="local", data=notes.toggle_pin(_note_scope(), user_id, item_id))
+
+
+@app.get("/api/notes-library", response_model=Resp)
+async def notes_library(q: str = "", limit: int = 100):
+    """补充记录库：所有用户手动补充过的 id 记录，支持按 id / 关键词搜索
+
+    q 为空 → 全部（按最近更新排序）；纯数字 → 按 uid 匹配；其它 → 关键词匹配。
+    列表里不含截图 base64（只有 has_image 标记），要看图请点进该 id。
+    """
+    return Resp(ok=True, source="local", data=notes.library(_note_scope(), q, limit))
 
 
 @app.get("/api/notes/export/all", response_model=Resp)

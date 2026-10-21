@@ -14,3 +14,7 @@ backend/*.log
 
 # 一次性探测脚本（调试接口用的，不需要入库）
 backend/probe_*.py
+
+# 运行日志
+server*.log
+*.log

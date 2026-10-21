@@ -36,6 +36,7 @@ from fastapi.responses import HTMLResponse, RedirectResponse, Response
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 
+import browser_cookie
 import mock_data
 import notes
 import scanner
@@ -459,6 +460,60 @@ async def login_by_password(body: PasswordIn, request: Request):
     return res
 
 
+@app.post("/api/local-cookie")
+async def local_cookie(request: Request):
+    """从本机浏览器（Chrome / Edge…）里读豆瓣登录态 —— 绕开 dbcl2 的 HttpOnly
+
+    为什么需要它：豆瓣的登录标识 `dbcl2` 是 HttpOnly，浏览器里的 JS（含小书签
+    `javascript:`）根本读不到，所以手机上「点书签带回 Cookie」注定失败。
+    后端和浏览器在同一台机器上时，可以直接读浏览器的 Cookie 库并解密。
+
+    安全：只在自用模式（非云端 / 非公网共享）且请求来自本机或局域网时可用，
+    绝不把这台电脑的登录态暴露给公网访客。
+    """
+    if CLOUD_MODE or PUBLIC_MODE:
+        return {"ok": False, "status": "disabled",
+                "detail": "当前是「每个访客登录自己账号」的模式，不能把这台电脑的"
+                          "登录态给别人用。请改用账号密码登录 / 接力码 / 手动粘贴 Cookie。"}
+    import ipaddress
+    host = _client_ip(request)
+    try:
+        private = ipaddress.ip_address(host).is_private
+    except Exception:
+        private = False
+    if not private:
+        return {"ok": False, "status": "forbidden",
+                "detail": "只允许从本机或家庭 / 公司局域网里读取浏览器登录态"}
+
+    got = browser_cookie.read_douban_cookie()
+    if not got.get("ok") or not got.get("cookie"):
+        return {"ok": False, "status": "not_found",
+                "detail": got.get("detail") or "没读到豆瓣的登录 Cookie"}
+
+    res = await _apply_credential("", got["cookie"], "", readonly=False)
+    if res.get("ok"):
+        # 本机 / 局域网自用：把 Cookie 明文回传一份，手机端也能直接带上
+        res["cookie"] = got["cookie"]
+        res["via"] = "local_browser"
+        res["browser"] = got.get("browser") or ""
+        res["source"] = got.get("profile") or ""
+        res["detail"] = (f"已从本机 {res['browser']}（{res['source']}）读到豆瓣登录态："
+                         f"{res.get('name') or ''}（uid {res.get('uid')}）")
+    return res
+
+
+@app.get("/api/local-cookie/support")
+async def local_cookie_support():
+    """本机浏览器读取是否可用（前端据此决定是否显示按钮）"""
+    ok = (os.name == "nt") and not (CLOUD_MODE or PUBLIC_MODE)
+    reason = ""
+    if os.name != "nt":
+        reason = "只支持 Windows"
+    elif CLOUD_MODE or PUBLIC_MODE:
+        reason = "当前是访客各自登录的模式，不读本机浏览器"
+    return {"ok": ok, "reason": reason}
+
+
 # ---------- 跨设备「接力码」：电脑上已登录，手机输入 6 位码即可 ----------
 _HANDOFF: dict[str, dict] = {}
 _HANDOFF_TTL = 300                     # 5 分钟
@@ -468,6 +523,7 @@ _HANDOFF_ALPHABET = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789"   # 去掉易混的 I O 0
 class HandoffIn(BaseModel):
     token: Optional[str] = None
     code: Optional[str] = None
+    cookie: Optional[str] = None      # 网页 Cookie 也能接力（手机拿不到时用）
 
 
 @app.post("/api/handoff/create")
@@ -478,17 +534,20 @@ async def handoff_create(body: HandoffIn):
     否则退回服务端保存的 token（仅本机自用模式，公网共享模式绝不外借）。
     """
     cred = (body.token or "").strip()
-    if not cred and not (PUBLIC_MODE or CLOUD_MODE):
+    cred_ck = (body.cookie or "").strip()
+    if not cred and not cred_ck and not (PUBLIC_MODE or CLOUD_MODE):
         cred = (client.token or "").strip()
-    if not cred:
+        cred_ck = (client.cookie or "").strip()
+    if not cred and not cred_ck:
         return {"ok": False, "detail": "这边还没有登录，无法生成接力码。"
                                       "请先在本页登录，或改用「账号密码」在手机上直接登录。"}
     now = time.time()
     for k in [k for k, v in _HANDOFF.items() if v["exp"] < now]:
         _HANDOFF.pop(k, None)
     code = "".join(secrets.choice(_HANDOFF_ALPHABET) for _ in range(6))
-    _HANDOFF[code] = {"token": cred, "exp": now + _HANDOFF_TTL}
-    return {"ok": True, "code": code, "expires_in": _HANDOFF_TTL}
+    _HANDOFF[code] = {"token": cred, "cookie": cred_ck, "exp": now + _HANDOFF_TTL}
+    return {"ok": True, "code": code, "expires_in": _HANDOFF_TTL,
+            "has_cookie": bool(cred_ck)}
 
 
 @app.post("/api/handoff/claim")
@@ -500,7 +559,8 @@ async def handoff_claim(body: HandoffIn):
         _HANDOFF.pop(code, None)
         return {"ok": False, "detail": "接力码无效或已过期（5 分钟内有效），请在电脑上重新生成"}
     _HANDOFF.pop(code, None)
-    return {"ok": True, "token": item["token"]}
+    return {"ok": True, "token": item.get("token") or "",
+            "cookie": item.get("cookie") or ""}
 
 
 @app.get("/api/cookie-login", response_class=HTMLResponse)

@@ -73,16 +73,18 @@ AUTH_TOKEN_URL_WWW = "https://www.douban.com/service/auth2/token"
 # 豆瓣的 password grant **必须带设备参数**，否则账号密码校验通过后就会报
 #   {"msg": "invalid_device_id"} —— 注意顺序：密码错时一律先返回 120
 #   username_password_mismatch，所以「密码错」看不出缺设备，只有密码填对了才暴露。
-# 设备参数格式参考豆瓣客户端抓包（40 位十六进制）：udid / device_id 相同，
-# douban_udid 由 udid 派生。udid 需**稳定不变**（每次都换会被当成新设备）。
+# 设备参数格式参考豆瓣 frodo 客户端抓包：udid / device_id 相同，是 **20 位十六进制**
+#   （公开抓包示例：frodo.douban.com/api/v2/group/xxx/topics?...&udid=5e4159565b89f86cccda）
+#   douban_udid 是 40 位十六进制。udid 需**稳定不变**（每次都换会被当成新设备）。
+#   注：早年豆瓣 FM 用的是 40 位，frodo 是 20 位；长度不合规会被判 invalid_device_id。
 DEVICE_FILE = os.path.join(os.path.dirname(os.path.abspath(__file__)), "data", "device.json")
 DEVICE_UDID = os.getenv("DOUBAN_DEVICE_ID", "").strip()   # 可用环境变量固定设备号
 
 
-def _new_udid() -> str:
-    """生成 40 位十六进制设备号（与豆瓣客户端同规格）"""
+def _new_udid(n: int = 20) -> str:
+    """生成十六进制设备号（frodo 客户端规格：20 位）"""
     import secrets
-    return (secrets.token_hex(16) + hashlib.sha1(secrets.token_bytes(16)).hexdigest())[:40]
+    return secrets.token_hex(n // 2)
 
 
 _UDID_CACHE = ""
@@ -98,7 +100,8 @@ def _load_udid() -> str:
     try:
         with open(DEVICE_FILE, "r", encoding="utf-8") as f:
             v = str((json.load(f) or {}).get("udid") or "").strip()
-        if len(v) >= 32:
+        # 旧版本存过 40 位的设备号（豆瓣 FM 规格），frodo 实际用 20 位，这里顺手迁移
+        if len(v) == 20:
             _UDID_CACHE = v
             return v
     except Exception:
@@ -270,12 +273,15 @@ class DoubanClient:
         }
         headers = {"User-Agent": UA, "Content-Type": "application/x-www-form-urlencoded"}
 
-        # 三种打法依次尝试：frodo 带设备 → 网页端点带设备 → frodo 换新设备号
+        # 依次尝试（密码错时不重试，见下面 code==120 直接 break）：
+        #   frodo + 本机固定 20 位设备 → 网页端点同设备 → frodo 换 20 位新设备
+        #   → frodo 换 40 位新设备（早年 FM 规格，个别账号认这个长度）
         udid = _load_udid()
         attempts = [
             (AUTH_TOKEN_URL, _device_params(udid)),
             (AUTH_TOKEN_URL_WWW, _device_params(udid)),
-            (AUTH_TOKEN_URL, _device_params(_new_udid())),
+            (AUTH_TOKEN_URL, _device_params(_new_udid(20))),
+            (AUTH_TOKEN_URL, _device_params(_new_udid(40))),
         ]
 
         last_code, last_raw, last_status = None, "", 0

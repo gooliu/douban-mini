@@ -220,17 +220,28 @@ docker run -d -p 8000:8000 -e DOUBAN_CLOUD=1 douban-mini
 >
 > ℹ️ 登录方式（登录弹窗里四选一）：
 > ① **豆瓣账号密码** —— 后端调 frodo `auth2/token` 换 Bearer token，密码不落盘；
-> ② **网页 Cookie（手机可用）** —— 走移动网页通道 m.douban.com/rexxar（豆瓣 H5 靠
->    Cookie 认登录态；frodo App 接口只认 Bearer，**所以 Cookie 必须走 rexxar 通道**）。
->    手机上用「一键带回」书签：先登录 m.douban.com，点书签自动跳回本页完成登录；
-> ③ 粘贴抓包拿到的 Bearer token；④ 电脑已登录时给手机发 6 位接力码。
+> ② **网页 Cookie** —— 走移动网页通道 m.douban.com/rexxar（豆瓣 H5 靠 Cookie 认
+>    登录态；frodo App 接口只认 Bearer，**所以 Cookie 必须走 rexxar 通道**）。
+>    - **电脑上（推荐）**：登录弹窗 →「网页 Cookie」→「从本机浏览器读取登录态」，
+>      后端直接读本机 Chrome / Edge / Firefox 的 Cookie 库并解密，**一键完成**；
+>    - 手机上：可以用「一键带回」书签，但见下方 ⚠️；
+> ③ 粘贴抓包拿到的 Bearer token；④ 电脑已登录时给手机发 6 位接力码（token / Cookie 都能接力）。
 >
-> 🔧 账号密码登录必须带设备标识（`udid` / `device_id` / `douban_udid`），
-> 否则密码校验通过后豆瓣会返回 `invalid_device_id`。设备号首次自动生成并存在
-> `backend/data/device.json`（可用环境变量 `DOUBAN_DEVICE_ID` 指定），
-> 每次登录保持一致；若被拒会自动换端点、换设备号各重试一次。
+> ⚠️ **为什么手机书签经常报「没读到 dbcl2」**：豆瓣把登录标识 `dbcl2` 设成了
+> **HttpOnly** —— 浏览器里的 JavaScript（包括 `javascript:` 小书签、`document.cookie`）
+> 根本读不到它，这是浏览器的安全机制，不是操作问题。书签脚本现在会区分三种情况并给出
+> 对应指引（一个 Cookie 都没有 / 有 bid、ck 但没有 dbcl2 / 正常）。手机上真正可行的
+> 是 **账号密码登录** 或 **接力码**；想在手机上用 Cookie，就在电脑读取后生成接力码。
+>
+> 🔧 账号密码登录必须带设备标识，否则密码校验通过后豆瓣会返回 `invalid_device_id`。
+> 设备号规格：**frodo 客户端是 20 位十六进制**（早年豆瓣 FM 是 40 位），首次自动生成并存在
+> `backend/data/device.json`（可用环境变量 `DOUBAN_DEVICE_ID` 指定），每次登录保持一致；
+> 被拒时会自动换端点 + 换 20/40 位设备号各重试一次（密码错则不重试）。
 > 仍失败通常是账号开了登录保护：先在手机豆瓣 App 里登录一次再回来重试，
-> 或改用 Cookie / 接力方式。
+> 或改用本机浏览器读取 / 接力方式。
+>
+> 🔒 「从本机浏览器读取」只在**自用模式**（不设 `DOUBAN_PUBLIC` / `DOUBAN_CLOUD`）且
+> 请求来自本机或局域网时可用 —— 公网共享模式下绝不把这台电脑的登录态给访客。
 >
 > ⚠️ 实测记录（2026-10-21）：`accounts.douban.com/j/mobile/login/basic`
 > 服务器直连一律返回 `captcha_required`（腾讯验证码），所以「账号密码换网页
@@ -250,7 +261,7 @@ docker run -d -p 8000:8000 -e DOUBAN_CLOUD=1 douban-mini
 | `DOUBAN_SELF_UID` | 自动推断 | 手动指定 token 对应 uid |
 | `DOUBAN_CACHE_TTL` | 600 | 缓存秒数 |
 | `DOUBAN_SCAN_GROUPS` | 8 | 保留参数（扫描方案已因接口限制失效） |
-| `DOUBAN_DEVICE_ID` | 自动生成 | 账号密码登录用的设备号（40 位十六进制）；一般用不到，仅调试用 |
+| `DOUBAN_DEVICE_ID` | 自动生成 | 账号密码登录用的设备号（20 位十六进制）；一般用不到，仅调试用 |
 
 ## 技术要点：frodo 签名算法（已实测）
 

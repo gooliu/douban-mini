@@ -24,6 +24,7 @@ import contextvars
 import json as _json
 import os
 import re
+import secrets
 import socket
 import time
 from pathlib import Path as FilePath
@@ -370,12 +371,21 @@ async def _apply_credential(token: str, cookie: str, self_uid: str = "",
     token = (token or "").strip()
     cookie = (cookie or "").strip()
     if not token and not cookie:
-        return {"ok": False, "status": "empty", "detail": "token 和 cookie 至少要填一个"}
+        return {"ok": False, "status": "empty", "detail": "请先登录（豆瓣账号密码 / token）"}
+    if not token and cookie:
+        # 实测：frodo 接口不认 Cookie（带不带 dbcl2 返回完全一样），
+        # 所以 Cookie 登录永远是失败。直接说清楚，别再让用户白折腾。
+        return {"ok": False, "status": "cookie_unsupported",
+                "detail": "豆瓣的 App 接口只认 Bearer token，不接受网页 Cookie"
+                          "（已实测），所以 Cookie 登录一定失败。"
+                          "请改用「账号密码登录」，或在「粘贴 token」里填 Bearer token。"}
 
     # 用临时凭证视图校验，绝不污染全局单例（云端多人共享时尤其重要）
     probe = client.scoped(token, cookie)
     if self_uid:
-        os.environ["DOUBAN_SELF_UID"] = str(self_uid).strip()
+        if not readonly:
+            # 本机自用才记住 uid；共享模式绝不能把访问者的 uid 写进进程环境
+            os.environ["DOUBAN_SELF_UID"] = str(self_uid).strip()
         probe._self_uid = str(self_uid).strip()
         probe._self_uid_ts = time.time()
     chk = await probe.check_token()
@@ -394,7 +404,9 @@ async def _apply_credential(token: str, cookie: str, self_uid: str = "",
         # readonly：外部访问者共享这台后端时，绝不能覆盖服务端保存的账号
         return {"ok": True, "status": "valid", "uid": chk.get("uid"),
                 "name": chk.get("name"), "via": chk.get("via"),
-                "saved": False, "cloud": True, "detail": detail}
+                "saved": False, "cloud": True, "detail": detail,
+                # 云模式凭证必须留在访问者浏览器里，所以要把 token 回传一次
+                "token": token}
 
     client.set_token(token)          # 只给 cookie 时会清空 token，自动走 Cookie 分支
     client.set_cookie(cookie)
@@ -421,22 +433,89 @@ async def set_token(body: TokenIn, request: Request):
                                    readonly=_visitor_must_login(request))
 
 
+class PasswordIn(BaseModel):
+    username: Optional[str] = None   # 豆瓣手机号 / 邮箱
+    password: Optional[str] = None   # 只用于向豆瓣换 token，不保存
+
+
+@app.post("/api/login/password")
+async def login_by_password(body: PasswordIn, request: Request):
+    """豆瓣账号密码登录 —— 手机上最省事的方式（不用抓包、不用开发者工具）
+
+    密码只用于向豆瓣换取 access_token：不写盘、不写日志、不回显。
+    本机模式：校验通过后保存，重启服务仍有效；
+    共享 / 公网模式：令牌只回传给访问者自己的浏览器，绝不写服务端。
+    """
+    try:
+        got = await client.login_with_password(body.username or "", body.password or "")
+    except DoubanError as e:
+        return {"ok": False, "status": "invalid", "code": e.code, "detail": e.msg}
+
+    res = await _apply_credential(got["token"], "", got.get("uid") or "",
+                                  readonly=_visitor_must_login(request))
+    if res.get("ok"):
+        days = int((got.get("expires_in") or 0) / 86400)
+        res["via"] = "password"
+        res["expires_in"] = got.get("expires_in", 0)
+        res["detail"] = (f"登录成功：{res.get('name') or ''}（uid {res.get('uid')}）"
+                         + (f"，令牌约 {days} 天有效" if days else ""))
+    return res
+
+
+# ---------- 跨设备「接力码」：电脑上已登录，手机输入 6 位码即可 ----------
+_HANDOFF: dict[str, dict] = {}
+_HANDOFF_TTL = 300                     # 5 分钟
+_HANDOFF_ALPHABET = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789"   # 去掉易混的 I O 0 1
+
+
+class HandoffIn(BaseModel):
+    token: Optional[str] = None
+    code: Optional[str] = None
+
+
+@app.post("/api/handoff/create")
+async def handoff_create(body: HandoffIn):
+    """生成一次性接力码（5 分钟有效）。
+
+    凭证来源：优先用请求里的 token（访问者存在自己浏览器里的），
+    否则退回服务端保存的 token（仅本机自用模式，公网共享模式绝不外借）。
+    """
+    cred = (body.token or "").strip()
+    if not cred and not (PUBLIC_MODE or CLOUD_MODE):
+        cred = (client.token or "").strip()
+    if not cred:
+        return {"ok": False, "detail": "这边还没有登录，无法生成接力码。"
+                                      "请先在本页登录，或改用「账号密码」在手机上直接登录。"}
+    now = time.time()
+    for k in [k for k, v in _HANDOFF.items() if v["exp"] < now]:
+        _HANDOFF.pop(k, None)
+    code = "".join(secrets.choice(_HANDOFF_ALPHABET) for _ in range(6))
+    _HANDOFF[code] = {"token": cred, "exp": now + _HANDOFF_TTL}
+    return {"ok": True, "code": code, "expires_in": _HANDOFF_TTL}
+
+
+@app.post("/api/handoff/claim")
+async def handoff_claim(body: HandoffIn):
+    """用接力码取回凭证（一次性，用过即失效）"""
+    code = (body.code or "").strip().upper().replace("-", "").replace(" ", "")
+    item = _HANDOFF.get(code)
+    if not item or item["exp"] < time.time():
+        _HANDOFF.pop(code, None)
+        return {"ok": False, "detail": "接力码无效或已过期（5 分钟内有效），请在电脑上重新生成"}
+    _HANDOFF.pop(code, None)
+    return {"ok": True, "token": item["token"]}
+
+
 @app.get("/api/cookie-login", response_class=HTMLResponse)
 async def cookie_login(request: Request, cookie: str = Query(""), uid: str = Query("")):
-    """小书签兜底通道：豆瓣页面的 CSP 可能拦掉 fetch，改用新窗口导航带出 Cookie。
+    """（已停用）旧的小书签 Cookie 通道 —— 豆瓣 App 接口不认 Cookie，这里只回一句说明。
 
     用法（新窗口打开）：/api/cookie-login?cookie=dbcl2%3D%22uid%3Axxx%22&uid=281065007
-    返回一个提示页面，告诉用户登录是否成功。
     """
     if not cookie:
         return _login_result_html(False, "没有收到 cookie 参数")
     r = await _apply_credential("", cookie, uid,
                                 readonly=_visitor_must_login(request))
-    if r.get("cloud"):
-        return _login_result_html(
-            r["ok"],
-            (r.get("detail", "") or "") +
-            "（共享模式：凭证没有存在服务器上，请在查询页面里粘贴这个 Cookie 完成登录）")
     return _login_result_html(r["ok"], r.get("detail", ""))
 
 
@@ -444,7 +523,7 @@ def _login_result_html(ok: bool, detail: str) -> str:
     color = "#2a6" if ok else "#d93025"
     title = "登录成功" if ok else "登录失败"
     tip = ("可以关掉这个窗口，回到查询页面刷新即可。" if ok
-           else "请确认豆瓣网页已登录、复制的是 dbcl2 的值；也可以手动粘到查询页的 Cookie 框。")
+           else "请回到查询页面，用「账号密码登录」或「粘贴 token」重新登录。")
     return f"""<!DOCTYPE html><html lang="zh"><head><meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
 <title>{title}</title><style>
@@ -706,7 +785,7 @@ async def create_scan_job(body: ScanIn):
         return {"ok": False, "need_login": True,
                 "detail": "豆瓣的「回帖/评论」接口已改为必须登录才能查看"
                           "（匿名会返回 403 need_permission）。"
-                          "请先点右上角「登录」粘贴你的豆瓣 Cookie 或 Bearer token，"
+                          "请先点右上角「登录」用豆瓣账号密码登录（或粘贴 Bearer token），"
                           "再启动回帖扫描。只扫发帖（posts）模式不受影响。"}
     try:
         job = await scanner.create_job(

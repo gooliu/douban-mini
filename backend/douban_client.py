@@ -58,9 +58,14 @@ COOLDOWN_STEPS = [60, 120, 240, 480, 900]
 
 # 可通过环境变量覆盖
 DOUBAN_TOKEN = os.getenv("DOUBAN_TOKEN", "").strip()  # 登录态 Bearer token（抓包获取）
-# 备选登录凭证：豆瓣网页版 Cookie，形如 dbcl2="281065007:xxxxxxxx"（浏览器 F12 可直接复制）
-# 优点：不用手机抓包、有效期通常比 frodo token 长。是否可用取决于豆瓣服务端是否认这个 Cookie。
+# 豆瓣网页版 Cookie，形如 dbcl2="281065007:xxxxxxxx"
+# ⚠️ 实测结论（2026-10）：frodo 接口**不认 Cookie**。带不带 dbcl2 返回完全一样
+#    （user/me 都回落到同一个匿名账号，他人接口一律 need_permission），
+#    所以 Cookie 登录必然失败，不要再把它当登录方式。真正能用的是 Bearer token。
 DOUBAN_COOKIE = os.getenv("DOUBAN_COOKIE", "").strip()
+
+# 豆瓣账号密码换 token（App 登录接口，手机端最省事：不用抓包、不用开发者工具）
+AUTH_TOKEN_URL = "https://frodo.douban.com/service/auth2/token"
 CACHE_TTL = int(os.getenv("DOUBAN_CACHE_TTL", "600"))  # 缓存秒数，默认 10 分钟
 SCAN_TOPICS_LIMIT = int(os.getenv("DOUBAN_SCAN_GROUPS", "8"))  # 扫描发言记录时最多遍历的小组数
 MAX_SCAN_GROUPS = int(os.getenv("DOUBAN_SCAN_GROUPS", "8"))     # 反查发言：单次最多扫描的小组数
@@ -181,6 +186,72 @@ class DoubanClient:
         self._cache = {k: v for k, v in self._cache.items() if not k[2]}  # k[2] = need_auth
         self._self_uid = None
         self._self_uid_ts = 0.0
+
+    async def login_with_password(self, username: str, password: str) -> dict:
+        """用豆瓣账号（手机号 / 邮箱）+ 密码 换取 frodo access_token
+
+        这是手机上最省事的登录方式：不用抓包 App、不用开发者工具、不用复制 Cookie。
+        密码只用于这一次向豆瓣换取令牌，**不保存、不写日志、不回显**。
+
+        返回 {token, refresh_token, expires_in, uid, name}
+        失败抛 DoubanError（msg 已是能直接展示给用户的中文）。
+        """
+        username = (username or "").strip()
+        password = password or ""
+        if not username or not password:
+            raise DoubanError(400, "请填写豆瓣账号（手机号 / 邮箱）和密码")
+        if len(password) < 4:
+            raise DoubanError(400, "密码看起来不完整，请重新输入")
+
+        data = {
+            "client_id": APIKEY,
+            "client_secret": SECRET,
+            "grant_type": "password",
+            "username": username,
+            "password": password,
+            "redirect_uri": "https://www.douban.com",
+        }
+        headers = {"User-Agent": UA, "Content-Type": "application/x-www-form-urlencoded"}
+        try:
+            async with httpx.AsyncClient(timeout=20, headers=headers) as hc:
+                r = await hc.post(AUTH_TOKEN_URL, data=data)
+        except Exception as e:
+            raise DoubanError(-1, f"连不上豆瓣登录服务器（{type(e).__name__}）。"
+                                  f"请检查网络，或稍后再试")
+
+        try:
+            j = r.json()
+        except Exception:
+            raise DoubanError(r.status_code, f"豆瓣返回了异常内容（HTTP {r.status_code}），"
+                                             f"请稍后再试")
+
+        token = (j.get("access_token") or "").strip()
+        if token:
+            return {
+                "token": token,
+                "refresh_token": (j.get("refresh_token") or "").strip(),
+                "expires_in": int(j.get("expires_in") or 0),
+                "uid": str(j.get("douban_user_id") or j.get("uid") or "").strip(),
+                "name": (j.get("douban_user_name") or j.get("name") or "").strip(),
+            }
+
+        code = j.get("code")
+        raw = str(j.get("msg") or "").strip()
+        friendly = {
+            120: "账号或密码不对，请检查后重试（注意不是昵称，是手机号 / 邮箱）",
+            113: "豆瓣登录参数异常，请稍后再试",
+            121: "账号不存在或已被停用",
+            130: "登录过于频繁，请过几分钟再试",
+        }.get(code)
+        if not friendly:
+            low = raw.lower()
+            if any(k in low for k in ("captcha", "verify", "sms", "security")):
+                friendly = ("豆瓣要求安全验证（换设备 / 异地登录常见）。"
+                            "请先在手机上打开豆瓣 App 正常使用一次，"
+                            "或改用「手机接力」/「粘贴 token」登录")
+            else:
+                friendly = raw or f"登录失败（HTTP {r.status_code}）"
+        raise DoubanError(code if isinstance(code, int) else -1, friendly)
 
     async def check_token(self) -> dict:
         """检测当前登录凭证是否有效，返回 {valid, code, msg, uid, name, via}
@@ -374,7 +445,7 @@ class DoubanClient:
             raise DoubanError(
                 1000,
                 "豆瓣要求登录后才能查看：该接口（回帖/评论、话题详情）已不再对匿名开放。"
-                "请点右上角「登录」粘贴你的豆瓣 Cookie 或 Bearer token 后重试。",
+                "请点右上角「登录」用豆瓣账号密码登录（或粘贴 Bearer token）后重试。",
                 need_login=True)
         if code == 103:
             # 登录信息失效 —— 同样属于「需要重新登录」，不是反爬。
@@ -557,7 +628,7 @@ class DoubanClient:
 
         LOGIN_REASON = ("豆瓣的「评论/回帖」接口已改为必须登录后才能查看，"
                         "匿名请求会被拒绝（403 need_permission）。"
-                        "请点右上角「登录」粘贴你的豆瓣 Cookie 或 Bearer token 后再试。")
+                        "请点右上角「登录」用豆瓣账号密码登录（或粘贴 Bearer token）后再试。")
 
         # 1) 登录态预检：手上有凭证才继续，否则立刻给出明确原因
         have_cred = bool(self.token or self.cookie)

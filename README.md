@@ -216,7 +216,11 @@ docker run -d -p 8000:8000 -e DOUBAN_CLOUD=1 douban-mini
 ```
 
 > ⚠️ 豆瓣对境外 IP 风控更严。如果部署后经常出现「机器人程序」提示，
-> 建议改用自己的云服务器（国内 IP）+ Cookie 登录。
+> 建议改用自己的云服务器（国内 IP）。
+>
+> ℹ️ 登录方式：页面里直接用**豆瓣账号密码**登录（后端调 frodo `auth2/token` 换
+> Bearer token，密码不落盘），或粘贴抓包拿到的 token。
+> **网页 Cookie（dbcl2）登录已移除**——实测 frodo 接口不认 Cookie，怎么复制都会失败。
 
 ## 环境变量
 

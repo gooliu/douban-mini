@@ -362,6 +362,41 @@
   .modal code { background: #f1f3f5; padding: 1px 4px; border-radius: 3px; }
   .relink { color: #2e963a; text-decoration: underline; cursor: pointer; }
 
+  /* 登录弹窗：手机优先（大输入框 / 大按钮 / 16px 防 iOS 自动放大） */
+  .modal-tabs { display: flex; gap: 6px; margin: 10px 0 12px; }
+  .modal .modal-tabs button {
+    flex: 1; margin: 0; padding: 10px 4px; font-size: 13px; font-weight: 600;
+    background: #f1f3f5; color: #556; border-radius: 8px;
+  }
+  .modal .modal-tabs button.active { background: #2e963a; color: #fff; }
+  .m-pane { display: none; }
+  .m-pane.active { display: block; }
+  .modal .m-input {
+    width: 100%; box-sizing: border-box; margin: 7px 0; padding: 13px 12px;
+    border: 1px solid #d9d9d9; border-radius: 9px; background: #fff; color: #222;
+    font-size: 16px; font-family: inherit;
+  }
+  .modal .m-input:focus { outline: none; border-color: #2e963a;
+    box-shadow: 0 0 0 3px rgba(46,150,58,.13); }
+  .m-pwd { position: relative; }
+  .m-pwd .m-input { padding-right: 66px; }
+  .modal button.m-eye {
+    position: absolute; right: 5px; top: 50%; transform: translateY(-50%);
+    width: auto; margin: 0; padding: 8px 11px; font-size: 12px;
+    background: #eef1f4; color: #456; border-radius: 7px;
+  }
+  .modal button.m-primary {
+    padding: 13px; font-size: 16px; font-weight: 600; border-radius: 10px; margin-top: 10px;
+  }
+  .modal button.m-primary:disabled { background: #a9cdb1; }
+  .m-code {
+    font-family: ui-monospace, Menlo, Consolas, monospace; font-size: 30px;
+    letter-spacing: 7px; text-align: center; font-weight: 700; color: #1f6b2c;
+    background: #f2f9f3; border: 1px dashed #b7d9bd; border-radius: 10px;
+    padding: 14px 6px; margin: 10px 0;
+  }
+  .modal .m-tip.small { font-size: 11.5px; color: #8a8a8a; margin-top: 8px; }
+
   /* 分享面板 */
   .share-qr { text-align: center; margin: 10px 0 12px; }
   .share-qr svg { width: 178px; height: 178px; }
@@ -508,72 +543,69 @@
     <span class="lf-dot"></span><span id="loginFabText">登录</span>
   </div>
 
-  <!-- Token 更新弹窗 -->
+  <!-- 登录弹窗（手机优先） -->
   <div class="modal-mask" id="tokenModal" onclick="if (event.target === this) closeTokenModal()">
     <div class="modal">
-      <h3 id="tokenModalTitle">更新豆瓣登录</h3>
-      <p class="m-tip">
-        豆瓣把「加入的小组 / 完整发言」设为仅本人可见，需要登录态 token。
-        token 有效期有限，失效后在这里粘贴新 token 即可，<b>不用重启服务</b>。
-        不登录也能用：用户信息、小组搜索、反查发帖 / 回帖（公开数据）。
-      </p>
-      <div class="m-sub">方式一：Bearer token（手机抓包）</div>
-      <textarea id="tokenInput" spellcheck="false"
-                placeholder="粘贴 Bearer token；也可以直接粘贴整段抓包文本，会自动提取"></textarea>
-      <div class="m-sub">方式二：网页 Cookie（电脑浏览器，更省事）</div>
-      <textarea id="cookieInput" spellcheck="false"
-                placeholder='粘贴 Cookie，含 dbcl2 即可，如：dbcl2="281065007:abc123..."'></textarea>
-      <div class="sf-row" style="display:flex;gap:8px;align-items:center;margin:6px 0">
-        <label style="font-size:12px;color:#555;min-width:52px">你的 uid</label>
-        <input id="selfUidInput" placeholder="Cookie 登录需填，如 281065007"
-               style="flex:1;padding:7px 9px;border:1px solid #d9d9d9;border-radius:6px;font-size:13px">
+      <h3 id="tokenModalTitle">登录豆瓣</h3>
+      <p class="m-tip">登录后才能看「我加入的小组 / 我的完整发言」，回帖反查也需要登录。
+        公开查询（用户资料、小组、他人发帖反查）不用登录。</p>
+
+      <div class="modal-tabs">
+        <button type="button" id="tab-pwd" class="active" onclick="switchLoginTab('pwd')">账号密码</button>
+        <button type="button" id="tab-token" onclick="switchLoginTab('token')">粘贴 token</button>
+        <button type="button" id="tab-handoff" onclick="switchLoginTab('handoff')">手机接力</button>
       </div>
-      <div class="m-status" id="tokenStatus"></div>
-      <button id="tokenSaveBtn" onclick="saveToken()">验证并保存</button>
+
+      <div class="m-pane active" id="pane-pwd">
+        <p class="m-tip"><b>手机上最好用</b>：直接输豆瓣手机号 / 密码，不用抓包、不用开发者工具。</p>
+        <input class="m-input" id="pwdUser" inputmode="email" autocomplete="username"
+               spellcheck="false" placeholder="豆瓣手机号 / 邮箱">
+        <div class="m-pwd">
+          <input class="m-input" id="pwdPass" type="password" autocomplete="current-password"
+                 placeholder="豆瓣密码">
+          <button type="button" class="m-eye" id="pwdEye" onclick="togglePwd()">显示</button>
+        </div>
+        <div class="m-status" id="pwdStatus"></div>
+        <button class="m-primary" id="pwdBtn" onclick="loginByPassword()">登录</button>
+        <p class="m-tip small">🔒 密码只用于向豆瓣换取登录令牌，<b>不保存、不写日志</b>。
+          如果豆瓣提示「需要安全验证」，请改用「手机接力」。</p>
+      </div>
+
+      <div class="m-pane" id="pane-token">
+        <p class="m-tip">已经有 Bearer token 就粘在这里；直接粘整段抓包文本也行，会自动提取。</p>
+        <textarea id="tokenInput" spellcheck="false"
+                  placeholder="Bearer xxxxx，或整段抓包文本"></textarea>
+        <div class="m-status" id="tokenStatus"></div>
+        <button class="m-primary" id="tokenSaveBtn" onclick="saveToken()">验证并登录</button>
+        <details>
+          <summary>token 从哪来？（抓包，安卓 / iOS 都能做）</summary>
+          <ol>
+            <li>手机装抓包 App：<b>HTTPCanary</b>（安卓）或 <b>Stream</b>（iOS），并信任它的证书。</li>
+            <li>只抓「豆瓣」App → 打开豆瓣随便刷一下首页。</li>
+            <li>找 <code>frodo.douban.com</code> 请求头里的
+                <code>Authorization: Bearer xxxx</code>，复制 Bearer 后面那串。</li>
+          </ol>
+        </details>
+      </div>
+
+      <div class="m-pane" id="pane-handoff">
+        <p class="m-tip">在<b>已经登录的电脑上</b>生成一个 6 位码，手机上输入它就能登录 ——
+          不用在手机上粘长串 token。</p>
+        <div class="m-sub2">① 在电脑上（本页已登录）生成码</div>
+        <button class="m-primary" id="hoGenBtn" onclick="createHandoff()">生成接力码</button>
+        <div class="m-code" id="hoCode" style="display:none"></div>
+        <div class="m-status" id="hoStatus"></div>
+        <div class="m-sub2">② 在手机上输入电脑显示的 6 位码</div>
+        <input class="m-input" id="hoInput" maxlength="6" autocapitalize="characters"
+               spellcheck="false" placeholder="例如 8HXTD6"
+               style="text-align:center;letter-spacing:5px;font-size:20px;font-weight:700;text-transform:uppercase">
+        <button class="m-primary" onclick="claimHandoff()">用这个码登录</button>
+        <p class="m-tip small">接力码 5 分钟内有效、只能用一次。</p>
+      </div>
+
       <button class="ghost" onclick="closeTokenModal()">取消</button>
-      <details>
-        <summary>方式一：怎么抓 token？（三步）</summary>
-        <ol>
-          <li>手机装抓包 App：<b>HTTPCanary</b>（安卓）或 <b>Stream</b>（iOS），
-              并安装/信任它的 CA 证书。</li>
-          <li>打开抓包 → 只选「豆瓣」App → 打开豆瓣 App 并<b>确认已登录</b>，随便刷一下首页。</li>
-          <li>在抓包记录里找 <code>frodo.douban.com</code> 的请求，
-              看请求头 <code>Authorization: Bearer xxxx</code>，
-              把 <code>Bearer</code> 后面那串复制出来粘到上面。</li>
-        </ol>
-      </details>
-      <details open>
-        <summary>方式二：怎么复制 Cookie？（推荐，有效期更长）</summary>
-
-        <div class="m-sub2">① 一键小书签（最省事，不用 F12）</div>
-        <p class="m-tip">把下面这个按钮<b>拖到浏览器的书签栏</b>（书签栏没显示就按
-          <code>Ctrl+Shift+B</code> 调出来）：</p>
-        <p style="margin:8px 0">
-          <a class="bk" id="bkLink"
-             href="javascript:(function(){var c=document.cookie||'';var m=c.match(/dbcl2=([^;]*)/);var v=m?decodeURIComponent(m[1]):'';if(!v){alert('没读到 dbcl2。请确认当前页面是 www.douban.com 且已登录。若读不到，请用 Ctrl+Shift+I 打开开发者工具手动复制。');return;}var ck=(c.match(/(?:^|;\s*)ck=([^;]*)/)||[])[1]||'';var cookie='dbcl2='+v+(ck?'; ck='+ck:'');var uid=v.split(String.fromCharCode(34)).join('').split(':')[0];var fallback=function(){if(navigator.clipboard&&navigator.clipboard.writeText){navigator.clipboard.writeText(cookie).then(function(){alert('自动提交失败，已复制到剪贴板，请粘到 Cookie 框（uid '+uid+'）');},function(){prompt('手动复制这段：',cookie);});}else{prompt('手动复制这段：',cookie);}};fetch('http://127.0.0.1:8000/api/config/token',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({cookie:cookie,self_uid:uid})}).then(function(r){return r.json();}).then(function(j){if(j&&j.ok){alert('登录成功：'+(j.name||'')+'（uid '+j.uid+'）');}else{alert('豆瓣拒绝了凭证：'+((j&&j.detail)||'未知原因'));fallback();}}).catch(function(){var url='http://127.0.0.1:8000/api/cookie-login?cookie='+encodeURIComponent(cookie)+'&amp;uid='+encodeURIComponent(uid);var w=window.open(url,'_blank');if(w){alert('已新开标签页提交，请看那个页面的结果。');}else{fallback();}});})()"
-             onclick="copyBookmark(event);return false;">📋 一键登录豆瓣</a>
-        </p>
-        <p class="m-tip">之后：打开 <b>www.douban.com</b> 登录 → 点一下书签栏上的
-          「📋 复制豆瓣Cookie」→ 弹窗说已复制 → 回来粘到上面的 Cookie 框。
-          拖不动的话，右键按钮选「复制链接地址」，手动新建书签粘贴进去。</p>
-
-        <div class="m-sub2">② 手动复制（开发者工具）</div>
-        <ol>
-          <li>电脑浏览器打开 <b>www.douban.com</b> 并登录。</li>
-          <li>打开开发者工具：<code>Ctrl+Shift+I</code>（或 <code>F12</code>；
-              页面空白处<b>右键 → 检查</b>；菜单 → 更多工具 → 开发者工具）。</li>
-          <li>切到 <code>Application</code>（应用）→ 左侧 <code>Cookies</code> →
-              <code>https://www.douban.com</code>。</li>
-          <li>找到 <code>dbcl2</code>，复制它的值（形如 <code>"281065007:xxxxxxxx"</code>），
-              粘到上面 Cookie 框；再在「你的 uid」里填 <code>281065007</code>。</li>
-        </ol>
-        <p class="m-tip"><b>F12 没反应？</b>常见原因：① 在预览面板 / 小程序里按的——
-          请用自己电脑的 Chrome 或 Edge 打开 <code>http://127.0.0.1:8000/</code>；
-          ② 笔记本要按 <code>Fn+F12</code>；③ 直接改用上面的小书签，完全不用开发者工具。</p>
-        <p class="m-tip">Cookie 有效期通常远长于 frodo token（token 常常一小时内就失效），
-          全量扫描动辄几十分钟，建议优先用 Cookie。</p>
-      </details>
-      <p class="m-tip">凭证只保存在本机 <code>backend/douban_config.json</code>，不会上传到任何地方。</p>
+      <p class="m-tip small" id="cookieDeadTip">ℹ️ 旧的「Cookie 登录」已移除：实测豆瓣 App 接口不认网页 Cookie，
+        怎么复制都会失败。</p>
     </div>
   </div>
 
@@ -745,39 +777,25 @@
 
         <div class="lp-section">
           <span class="lp-tag recommend">推荐</span>
-          <b>一键登录豆瓣（电脑浏览器，最省事）</b>
+          <b>豆瓣账号密码登录（手机上最好用）</b>
           <div class="lp-step">
-            ① 把下面绿按钮<b>拖到浏览器书签栏</b>
-            （没看到书签栏就按 <code>Ctrl+Shift+B</code> 调出来）
+            直接输豆瓣手机号 / 密码即可，<b>不用抓包、不用开发者工具、不用复制 Cookie</b>。
           </div>
-          <a class="lp-bk" id="lpBkBtn" onclick="copyBookmark(event);return false;">📋 一键登录豆瓣</a>
+          <input class="lp-input" id="lpUser" inputmode="email" autocomplete="username"
+                 spellcheck="false" placeholder="豆瓣手机号 / 邮箱">
+          <input class="lp-input" id="lpPass" type="password" autocomplete="current-password"
+                 placeholder="豆瓣密码" style="margin-top:8px">
+          <button class="lp-big-btn" id="lpPwdBtn" onclick="lpLoginByPassword()">登录</button>
+          <div class="lp-status" id="lpPwdStatus"></div>
+          <div class="lp-step" style="margin-top:8px">🔒 密码只用于向豆瓣换登录令牌，不保存、不写日志。</div>
           <div class="lp-step">
-            ② 电脑浏览器打开 <code>www.douban.com</code> 并登录<br>
-            ③ 点一下书签栏上的「📋 一键登录豆瓣」<br>
-            ④ 看到弹窗「登录成功」就完成，全过程不用粘贴
+            豆瓣提示「需要安全验证」，或想用电脑的登录态直接给手机用？
+            <span class="relink" onclick="openTokenModal('handoff')">用手机接力 / 粘贴 token →</span>
           </div>
-        </div>
-
-        <div class="lp-section">
-          <span class="lp-tag normal">简单</span>
-          <b>直接粘贴 Cookie</b>
-          <div class="lp-step">
-            在 <code>www.douban.com</code> 按 <code>Ctrl+Shift+I</code>
-            → <code>Application</code> → <code>Cookies</code> →
-            找到 <code>dbcl2</code> 复制它的值
-          </div>
-          <textarea class="lp-input" id="lpCookieInput" rows="2"
-                    placeholder='粘贴 dbcl2 的值（含引号更好）'></textarea>
-          <div class="lp-row">
-            <label>你的 uid</label>
-            <input class="lp-input" id="lpCookieUid" placeholder="必填，如 281065007">
-          </div>
-          <button class="lp-big-btn" onclick="lpSaveCookie()">验证并登录</button>
-          <div class="lp-status" id="lpCookieStatus"></div>
         </div>
 
         <details class="lp-section">
-          <summary><b>填 Bearer Token（需要手机抓包）</b></summary>
+          <summary><b>我已有 Bearer Token（抓包）</b></summary>
           <div class="lp-step">
             安卓装 <code>HTTPCanary</code>，iOS 装 <code>Stream</code>。
             打开豆瓣 App 抓包，找 <code>frodo.douban.com</code> 请求头里的
@@ -1367,12 +1385,11 @@ async function refreshLoginState() {
     else if (st === 'invalid') setFab('warn', '凭证无效 · 点此更新');
     else setFab('missing', needLogin ? '未登录 · 点此登录' : '未登录');
     $('loginPrompt').style.display = 'block';
-    // 只预填「这个浏览器自己」上次登录过的 uid，绝不使用服务端账号
-    const uidInput = $('lpCookieUid');
-    const savedUid = lsGet('douban_self_uid');
-    if (uidInput && !uidInput.value && savedUid) uidInput.value = savedUid;
+    // 只预填「这个浏览器自己」上次登录过的账号，绝不使用服务端账号
+    const userInput = $('lpUser');
+    const savedUser = lsGet('douban_login_user');
+    if (userInput && !userInput.value && savedUser) userInput.value = savedUser;
   }
-  syncBookmarkUrl();
   return h;
 }
 
@@ -1403,39 +1420,43 @@ async function applyApiBase() {
   }
 }
 
-/* ── 登录引导卡：直接提交（不依赖弹窗） ── */
-async function lpSaveCookie() {
-  const cookie = $('lpCookieInput').value.trim();
-  const uid = $('lpCookieUid').value.trim();
-  const st = $('lpCookieStatus');
-  const btn = event.target;
-  if (!cookie) { st.className='lp-status err'; st.textContent='请粘贴 Cookie'; return; }
-  if (!uid) { st.className='lp-status err'; st.textContent='请填 uid'; return; }
-  btn.disabled = true; btn.textContent = '验证中…';
-  st.className = 'lp-status'; st.textContent = '正在请求豆瓣校验…';
+/* ── 未登录引导卡：账号密码直接登录（不依赖弹窗） ── */
+async function lpLoginByPassword() {
+  const user = $('lpUser').value.trim();
+  const pass = $('lpPass').value;
+  const st = $('lpPwdStatus'), btn = $('lpPwdBtn');
+  if (!user || !pass) {
+    st.className = 'lp-status err';
+    st.textContent = '请填写豆瓣账号和密码';
+    return;
+  }
+  btn.disabled = true; btn.textContent = '登录中…';
+  st.className = 'lp-status'; st.textContent = '正在向豆瓣验证…';
   try {
-    const r = await fetch(API + '/api/config/token', {
+    const r = await fetch(API + '/api/login/password', {
       method: 'POST', headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ cookie, self_uid: uid }) });
-    const j = await r.json();
+      body: JSON.stringify({ username: user, password: pass }) });
+    const j = await r.json().catch(() => ({}));
     if (j.ok) {
-      afterLoginOk('', cookie);        // 云端模式：凭证只存这个浏览器
+      lsSet('douban_login_user', user);
+      if (j.token) saveCred(j.token, '');   // 共享 / 公网模式：凭证只存这个浏览器
+      $('lpPass').value = '';
       st.className = 'lp-status ok';
-      st.textContent = '✅ 已登录：' + (j.name || '') + '（uid ' + j.uid + '）' +
-        (j.cloud ? '（凭证只存在你自己的浏览器里）' : '');
+      st.textContent = '✅ ' + (j.detail || '登录成功');
       btn.textContent = '已登录';
-      setTimeout(() => refreshLoginState(), 800);
+      setTimeout(async () => { await refreshLoginState(); loadMe(); }, 700);
     } else {
       st.className = 'lp-status err';
-      st.textContent = '❌ ' + (j.detail || 'Cookie 无效') +
-        (j.status === 'expired' ? '（请重新复制）' : '');
+      st.textContent = '❌ ' + (j.detail || '登录失败');
       btn.disabled = false; btn.textContent = '重试';
     }
   } catch (e) {
-    st.className = 'lp-status err'; st.textContent = '❌ 无法连接后端';
+    st.className = 'lp-status err';
+    st.textContent = '❌ 无法连接后端';
     btn.disabled = false; btn.textContent = '重试';
   }
 }
+
 async function lpSaveToken() {
   let token = $('lpTokenInput').value.trim();
   const m = token.match(/Bearer\s+([A-Za-z0-9._\-]+)/i);
@@ -1514,33 +1535,6 @@ function setFab(state, text) {
   fab.classList.toggle('ok', state === 'ok');
   fab.classList.toggle('warn', state === 'warn');
   $('loginFabText').textContent = text;
-}
-
-/* 小书签里的后端地址改成当前实际地址（别人通过公网域名访问时也能用） */
-function syncBookmarkUrl() {
-  const a = $('bkLink');
-  if (!a || !API) return;
-  let href = a.getAttribute('href') || '';
-  if (href.indexOf('127.0.0.1:8000') < 0) return;   // 已替换过
-  a.setAttribute('href', href.replace(/http:\/\/127\.0\.0\.1:8000/g, API));
-}
-
-/* 点击小书签按钮时不要跳转（那样只会执行在本页、读不到豆瓣 Cookie），
-   而是把代码复制出来，提示拖到书签栏 / 手动新建书签 */
-function copyBookmark(ev) {
-  ev.preventDefault();
-  const code = $('bkLink').getAttribute('href');
-  const tip = '已复制小书签代码。\n\n' +
-    '用法：书签栏右键 → 添加网页 → 名称随便填 → 网址粘贴刚复制的内容 → 保存。\n' +
-    '然后打开 www.douban.com（已登录），点一下那个书签。\n\n' +
-    '（也可以直接把页面上的绿色按钮拖到书签栏，更省事。）';
-  if (navigator.clipboard && navigator.clipboard.writeText) {
-    navigator.clipboard.writeText(code).then(
-      () => alert(tip),
-      () => prompt('手动复制下面这段，新建书签时粘到「网址」：', code));
-  } else {
-    prompt('手动复制下面这段，新建书签时粘到「网址」：', code);
-  }
 }
 
 /* ---------- 分享给他人 ---------- */
@@ -1645,37 +1639,164 @@ async function doLogout() {
   }
 }
 
-function openTokenModal() {
-  $('tokenModal').classList.add('show');
-  $('tokenStatus').textContent = '';
-  $('tokenStatus').className = 'm-status';
-  $('selfUidInput').value = (selfAccount && selfAccount.uid)
-    || (loginState && loginState.self_uid) || '';
-  $('tokenSaveBtn').disabled = false;
-  $('tokenSaveBtn').textContent = '验证并保存';
-  setTimeout(() => $('tokenInput').focus(), 50);
+/* ---------- 登录弹窗：账号密码 / 粘贴 token / 手机接力 ---------- */
+let loginTab = 'pwd';
+
+function switchLoginTab(name) {
+  loginTab = name || 'pwd';
+  ['pwd', 'token', 'handoff'].forEach(k => {
+    const t = $('tab-' + k), p = $('pane-' + k);
+    if (t) t.classList.toggle('active', k === loginTab);
+    if (p) p.classList.toggle('active', k === loginTab);
+  });
+  if (loginTab === 'handoff') prepHandoff();
 }
 
-function closeTokenModal() { $('tokenModal').classList.remove('show'); }
+function openTokenModal(tab) {
+  $('tokenModal').classList.add('show');
+  ['pwdStatus', 'tokenStatus', 'hoStatus'].forEach(id => {
+    const el = $(id);
+    if (el) { el.textContent = ''; el.className = 'm-status'; }
+  });
+  const u = $('pwdUser');
+  if (u && !u.value) u.value = lsGet('douban_login_user') || '';
+  const b = $('pwdBtn');
+  if (b) { b.disabled = false; b.textContent = '登录'; }
+  switchLoginTab(tab || loginTab);
+  if (loginTab === 'token') setTimeout(() => { const t = $('tokenInput'); if (t) t.focus(); }, 60);
+}
+
+function closeTokenModal() {
+  $('tokenModal').classList.remove('show');
+  const p = $('pwdPass'); if (p) p.value = '';
+}
+
+function togglePwd() {
+  const i = $('pwdPass'), b = $('pwdEye');
+  if (!i || !b) return;
+  const show = i.type === 'password';
+  i.type = show ? 'text' : 'password';
+  b.textContent = show ? '隐藏' : '显示';
+}
+
+async function loginByPassword() {
+  const user = ($('pwdUser').value || '').trim();
+  const pass = $('pwdPass').value || '';
+  const st = $('pwdStatus'), btn = $('pwdBtn');
+  if (!user || !pass) {
+    st.className = 'm-status err';
+    st.textContent = '请填写豆瓣账号（手机号 / 邮箱）和密码';
+    return;
+  }
+  btn.disabled = true; btn.textContent = '登录中…';
+  st.className = 'm-status'; st.textContent = '正在向豆瓣验证…';
+  try {
+    const r = await fetch(API + '/api/login/password', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ username: user, password: pass }),
+    });
+    const j = await r.json().catch(() => ({}));
+    if (j.ok) {
+      lsSet('douban_login_user', user);
+      if (j.token) saveCred(j.token, '');   // 共享 / 公网模式：令牌只存这个浏览器
+      $('pwdPass').value = '';
+      st.className = 'm-status ok';
+      st.textContent = '✅ ' + (j.detail || '登录成功');
+      btn.textContent = '已登录';
+      setTimeout(async () => { closeTokenModal(); await refreshLoginState(); loadMe(); }, 700);
+    } else {
+      st.className = 'm-status err';
+      st.textContent = '❌ ' + (j.detail || '登录失败');
+      btn.disabled = false; btn.textContent = '重试';
+    }
+  } catch (e) {
+    st.className = 'm-status err';
+    st.textContent = '❌ 连不上后端（' + API + '）';
+    btn.disabled = false; btn.textContent = '重试';
+  }
+}
+
+function prepHandoff() {
+  const gen = $('hoGenBtn');
+  if (!gen) return;
+  const logged = !!(loginState && loginState.token_status === 'valid');
+  gen.style.display = logged ? 'block' : 'none';
+  if (!logged) {
+    const st = $('hoStatus');
+    if (st && !st.textContent) {
+      st.className = 'm-status';
+      st.textContent = '这台设备还没登录：请在电脑上登录后生成码，再回来输入。';
+    }
+  }
+}
+
+async function createHandoff() {
+  const btn = $('hoGenBtn'), st = $('hoStatus'), box = $('hoCode');
+  btn.disabled = true; btn.textContent = '生成中…';
+  st.className = 'm-status'; st.textContent = '';
+  try {
+    const r = await fetch(API + '/api/handoff/create', {
+      method: 'POST',
+      headers: Object.assign({ 'Content-Type': 'application/json' }, credHeaders()),
+      body: JSON.stringify({ token: lsGet('douban_token') || '' }),
+    });
+    const j = await r.json().catch(() => ({}));
+    if (j.ok) {
+      box.style.display = 'block';
+      box.textContent = j.code;
+      st.className = 'm-status ok';
+      st.textContent = '把这个码输入到手机上（5 分钟内有效，只能用一次）';
+    } else {
+      st.className = 'm-status err';
+      st.textContent = '❌ ' + (j.detail || '生成失败');
+    }
+  } catch (e) {
+    st.className = 'm-status err'; st.textContent = '❌ 连不上后端';
+  }
+  btn.disabled = false; btn.textContent = '重新生成';
+}
+
+async function claimHandoff() {
+  const code = ($('hoInput').value || '').trim().toUpperCase();
+  const st = $('hoStatus');
+  if (code.length < 6) {
+    st.className = 'm-status err';
+    st.textContent = '请输入电脑上显示的 6 位码';
+    return;
+  }
+  st.className = 'm-status'; st.textContent = '正在换取登录态…';
+  try {
+    const r = await fetch(API + '/api/handoff/claim', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ code }),
+    });
+    const j = await r.json().catch(() => ({}));
+    if (j.ok && j.token) {
+      saveCred(j.token, '');
+      st.className = 'm-status ok';
+      st.textContent = '✅ 已接手电脑上的登录态';
+      $('hoInput').value = '';
+      setTimeout(async () => { closeTokenModal(); await refreshLoginState(); loadMe(); }, 700);
+    } else {
+      st.className = 'm-status err';
+      st.textContent = '❌ ' + (j.detail || '接力失败');
+    }
+  } catch (e) {
+    st.className = 'm-status err'; st.textContent = '❌ 连不上后端';
+  }
+}
 
 async function saveToken() {
   // 容错：允许直接粘贴整段请求头 / 抓包文本，自动提取 Bearer 后面那串
-  let token = $('tokenInput').value.trim();
+  let token = ($('tokenInput').value || '').trim();
   const m = token.match(/Bearer\s+([A-Za-z0-9._\-]+)/i);
   if (m) token = m[1];
   else token = token.replace(/^Bearer\s+/i, '').trim();
-  const cookie = $('cookieInput').value.trim();
-  const selfUid = $('selfUidInput').value.trim();
   const st = $('tokenStatus'), btn = $('tokenSaveBtn');
 
-  if (!token && !cookie) {
+  if (!token) {
     st.className = 'm-status err';
-    st.textContent = '请至少填一种：Bearer token 或 网页 Cookie';
-    return;
-  }
-  if (cookie && !selfUid) {
-    st.className = 'm-status err';
-    st.textContent = '用 Cookie 登录请同时填写你的 uid（Cookie 里 dbcl2 冒号前那串数字）';
+    st.textContent = '请粘贴 Bearer token';
     return;
   }
   btn.disabled = true; btn.textContent = '验证中…';
@@ -1683,23 +1804,19 @@ async function saveToken() {
   try {
     const r = await fetch(API + '/api/config/token', {
       method: 'POST', headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ token: token || null, cookie: cookie || null,
-                             self_uid: selfUid || null }),
+      body: JSON.stringify({ token }),
     });
     const j = await r.json().catch(() => ({}));
     if (j.ok) {
-      afterLoginOk(token, cookie);    // 云端模式：凭证只存这个浏览器
+      afterLoginOk(token, '');   // 云端模式：凭证只存这个浏览器
       st.className = 'm-status ok';
-      st.textContent = '✅ ' + j.detail +
-        (j.cloud ? '（凭证只存在你自己的浏览器里）' : '');
+      st.textContent = '✅ ' + j.detail + (j.cloud ? '（凭证只存在你自己的浏览器里）' : '');
       btn.textContent = '登录成功';
-      selfAccount = { uid: j.uid, name: j.name, avatar: '',
-                      topics_total: j.topics_total || null };
-      setTimeout(() => { closeTokenModal(); loadMe(); }, 900);
+      selfAccount = { uid: j.uid, name: j.name, avatar: '', topics_total: null };
+      setTimeout(async () => { closeTokenModal(); await refreshLoginState(); loadMe(); }, 900);
     } else {
       st.className = 'm-status err';
-      st.textContent = '❌ ' + (j.detail || '凭证无效') +
-        (j.status === 'expired' ? '（已过期，建议改用 Cookie 登录）' : '');
+      st.textContent = '❌ ' + (j.detail || '凭证无效');
       btn.disabled = false; btn.textContent = '重试';
     }
   } catch (e) {

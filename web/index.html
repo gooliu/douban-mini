@@ -917,30 +917,49 @@ async function initApiBase() {
   API = detectApiBase();
 }
 
-/* ---------- 混合内容兜底提示 ----------
- * 静态页是 https、后端是 http 时，浏览器会直接拦掉请求。
- * 这里给出明确提示 + 一键跳同源 HTTP 版（端口映射后功能完整）。
+/* ---------- 混合内容兜底提示（能通就不弹，关过就别再烦人）----------
+ * 只有当「https 页面 + http 后端」且实测请求真的被浏览器拦掉时才提示。
+ * 之前是只要地址不匹配就弹，其实很多时候请求是通的，白白打扰。
+ * 点 ✕ 静默 7 天（多点几次也不烦人），点「不再提示」静默一年。
  */
-(function () {
+const MC_MUTE_KEY = 'douban_mc_muted_until';
+
+function mcMuted() {
+  return (parseInt(lsGet(MC_MUTE_KEY) || '0', 10) || 0) > Date.now();
+}
+function mcMute(days) {
+  lsSet(MC_MUTE_KEY, String(Date.now() + days * 86400000));
+}
+
+async function maybeWarnMixedContent() {
   try {
-    if (location.protocol !== 'https:') return;
-    if (!/^http:\/\//i.test(API)) return;
-    window.addEventListener('load', function () {
-      var box = document.createElement('div');
-      box.style.cssText = 'position:fixed;left:0;right:0;top:0;z-index:99999;background:#fff7e6;color:#8a5a00;' +
-        'border-bottom:1px solid #ffd591;padding:10px 14px;font-size:13px;line-height:1.8;' +
-        'box-shadow:0 2px 8px rgba(0,0,0,.08)';
-      box.innerHTML = '⚠️ 当前是 HTTPS 页面，浏览器会拦截对 HTTP 后端（' + API + '）的请求。<br>' +
-        '解决办法二选一：① 点地址栏右侧「锁/盾牌」图标 → 允许加载不安全内容；' +
-        '② <a href="' + API + '/web/" target="_blank" rel="noopener" ' +
-        'style="color:#d46b08;font-weight:600">点这里打开同源 HTTP 版（功能完整，推荐）</a>。' +
-        '<span id="__mcclose" style="float:right;cursor:pointer;font-weight:700">✕</span>';
-      document.body.appendChild(box);
-      var c = document.getElementById('__mcclose');
-      if (c) c.onclick = function () { box.remove(); };
-    });
+    if (location.protocol !== 'https:') return;   // 页面本身是 http → 不存在混合内容
+    if (!/^http:\/\//i.test(API)) return;         // 同源或后端也是 https → 没问题
+    if (mcMuted()) return;                        // 用户之前关过 → 不再提示
+    // 真的发一次请求：能通就说明浏览器没拦（功能正常），静默跳过
+    try {
+      const r = await fetch(API + '/api/health', { headers: credHeaders(), cache: 'no-store' });
+      if (r.ok) return;
+    } catch (e) { /* 请求失败 → 大概率被拦，下面给提示 */ }
+
+    const box = document.createElement('div');
+    box.style.cssText = 'position:fixed;left:0;right:0;top:0;z-index:99999;background:#fff7e6;color:#8a5a00;' +
+      'border-bottom:1px solid #ffd591;padding:10px 14px;font-size:13px;line-height:1.8;' +
+      'box-shadow:0 2px 8px rgba(0,0,0,.08)';
+    box.innerHTML = '⚠️ 当前是 HTTPS 页面，浏览器拦截了对 HTTP 后端（' + API + '）的请求。<br>' +
+      '解决办法二选一：① 点地址栏右侧「锁/盾牌」图标 → 允许加载不安全内容；' +
+      '② <a href="' + API + '/web/" target="_blank" rel="noopener" ' +
+      'style="color:#d46b08;font-weight:600">点这里打开同源 HTTP 版（功能完整，推荐）</a>。' +
+      '<span style="float:right;margin-left:12px">' +
+      '<a id="__mcmute" href="javascript:void(0)" style="color:#8a5a00">不再提示</a>' +
+      '<span id="__mcclose" style="cursor:pointer;font-weight:700;margin-left:10px">✕</span></span>';
+    document.body.appendChild(box);
+    const close = document.getElementById('__mcclose');
+    const mute = document.getElementById('__mcmute');
+    if (close) close.onclick = () => { mcMute(7); box.remove(); };
+    if (mute) mute.onclick = () => { mcMute(365); box.remove(); };
   } catch (e) {}
-})();
+}
 
 /* ---------- 凭证（云端共享时只存访问者自己的浏览器）----------
  * 云端后端（Render 等）设了 DOUBAN_CLOUD=1，服务端不保存任何人的凭证；
@@ -2709,6 +2728,7 @@ $('userIdInput').addEventListener('keydown', e => {
 (async function boot() {
   await initApiBase();
   loadMe();
+  maybeWarnMixedContent();
 })();
 
 /* 注册 Service Worker：让手机「添加到主屏幕」后离线也能打开（不影响实时数据） */

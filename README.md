@@ -221,6 +221,12 @@ docker run -d -p 8000:8000 -e DOUBAN_CLOUD=1 douban-mini
 > ℹ️ 登录方式：页面里直接用**豆瓣账号密码**登录（后端调 frodo `auth2/token` 换
 > Bearer token，密码不落盘），或粘贴抓包拿到的 token。
 > **网页 Cookie（dbcl2）登录已移除**——实测 frodo 接口不认 Cookie，怎么复制都会失败。
+>
+> 🔧 账号密码登录必须带设备标识（`udid` / `device_id` / `douban_udid`），
+> 否则密码校验通过后豆瓣会返回 `invalid_device_id`。设备号首次自动生成并存在
+> `backend/data/device.json`（可用环境变量 `DOUBAN_DEVICE_ID` 指定），
+> 每次登录保持一致；若被拒会自动换端点、换设备号各重试一次。
+> 仍失败通常是账号开了登录保护：先在手机豆瓣 App 里登录一次再回来重试。
 
 ## 环境变量
 
@@ -231,6 +237,7 @@ docker run -d -p 8000:8000 -e DOUBAN_CLOUD=1 douban-mini
 | `DOUBAN_SELF_UID` | 自动推断 | 手动指定 token 对应 uid |
 | `DOUBAN_CACHE_TTL` | 600 | 缓存秒数 |
 | `DOUBAN_SCAN_GROUPS` | 8 | 保留参数（扫描方案已因接口限制失效） |
+| `DOUBAN_DEVICE_ID` | 自动生成 | 账号密码登录用的设备号（40 位十六进制）；一般用不到，仅调试用 |
 
 ## 技术要点：frodo 签名算法（已实测）
 

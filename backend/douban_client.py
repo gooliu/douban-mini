@@ -66,6 +66,62 @@ DOUBAN_COOKIE = os.getenv("DOUBAN_COOKIE", "").strip()
 
 # 豆瓣账号密码换 token（App 登录接口，手机端最省事：不用抓包、不用开发者工具）
 AUTH_TOKEN_URL = "https://frodo.douban.com/service/auth2/token"
+# 备用端点：网页版 OAuth（同一个 client_id/secret）。frodo 端点报 invalid_device_id 时换它再试
+AUTH_TOKEN_URL_WWW = "https://www.douban.com/service/auth2/token"
+
+# ---- 设备标识（登录必需，实测结论 2026-10）----
+# 豆瓣的 password grant **必须带设备参数**，否则账号密码校验通过后就会报
+#   {"msg": "invalid_device_id"} —— 注意顺序：密码错时一律先返回 120
+#   username_password_mismatch，所以「密码错」看不出缺设备，只有密码填对了才暴露。
+# 设备参数格式参考豆瓣客户端抓包（40 位十六进制）：udid / device_id 相同，
+# douban_udid 由 udid 派生。udid 需**稳定不变**（每次都换会被当成新设备）。
+DEVICE_FILE = os.path.join(os.path.dirname(os.path.abspath(__file__)), "data", "device.json")
+DEVICE_UDID = os.getenv("DOUBAN_DEVICE_ID", "").strip()   # 可用环境变量固定设备号
+
+
+def _new_udid() -> str:
+    """生成 40 位十六进制设备号（与豆瓣客户端同规格）"""
+    import secrets
+    return (secrets.token_hex(16) + hashlib.sha1(secrets.token_bytes(16)).hexdigest())[:40]
+
+
+_UDID_CACHE = ""
+
+
+def _load_udid() -> str:
+    """读取（必要时生成并持久化）本机设备号，失败则退回内存值"""
+    global _UDID_CACHE
+    if DEVICE_UDID:
+        return DEVICE_UDID
+    if _UDID_CACHE:
+        return _UDID_CACHE
+    try:
+        with open(DEVICE_FILE, "r", encoding="utf-8") as f:
+            v = str((json.load(f) or {}).get("udid") or "").strip()
+        if len(v) >= 32:
+            _UDID_CACHE = v
+            return v
+    except Exception:
+        pass
+    v = _new_udid()
+    try:
+        os.makedirs(os.path.dirname(DEVICE_FILE), exist_ok=True)
+        with open(DEVICE_FILE, "w", encoding="utf-8") as f:
+            json.dump({"udid": v}, f)
+    except Exception:
+        pass          # 只读环境（云端容器）：用内存里的值，进程内保持一致
+    _UDID_CACHE = v
+    return v
+
+
+def _device_params(udid: str | None = None) -> dict:
+    """登录请求要带的设备三件套"""
+    u = udid or _load_udid()
+    return {
+        "udid": u,
+        "device_id": u,
+        "douban_udid": hashlib.sha1(u.encode()).hexdigest(),
+    }
 CACHE_TTL = int(os.getenv("DOUBAN_CACHE_TTL", "600"))  # 缓存秒数，默认 10 分钟
 SCAN_TOPICS_LIMIT = int(os.getenv("DOUBAN_SCAN_GROUPS", "8"))  # 扫描发言记录时最多遍历的小组数
 MAX_SCAN_GROUPS = int(os.getenv("DOUBAN_SCAN_GROUPS", "8"))     # 反查发言：单次最多扫描的小组数
@@ -203,40 +259,68 @@ class DoubanClient:
         if len(password) < 4:
             raise DoubanError(400, "密码看起来不完整，请重新输入")
 
-        data = {
+        base = {
             "client_id": APIKEY,
             "client_secret": SECRET,
+            "apikey": APIKEY,
             "grant_type": "password",
             "username": username,
             "password": password,
             "redirect_uri": "https://www.douban.com",
         }
         headers = {"User-Agent": UA, "Content-Type": "application/x-www-form-urlencoded"}
-        try:
-            async with httpx.AsyncClient(timeout=20, headers=headers) as hc:
-                r = await hc.post(AUTH_TOKEN_URL, data=data)
-        except Exception as e:
-            raise DoubanError(-1, f"连不上豆瓣登录服务器（{type(e).__name__}）。"
-                                  f"请检查网络，或稍后再试")
 
-        try:
-            j = r.json()
-        except Exception:
-            raise DoubanError(r.status_code, f"豆瓣返回了异常内容（HTTP {r.status_code}），"
-                                             f"请稍后再试")
+        # 三种打法依次尝试：frodo 带设备 → 网页端点带设备 → frodo 换新设备号
+        udid = _load_udid()
+        attempts = [
+            (AUTH_TOKEN_URL, _device_params(udid)),
+            (AUTH_TOKEN_URL_WWW, _device_params(udid)),
+            (AUTH_TOKEN_URL, _device_params(_new_udid())),
+        ]
 
-        token = (j.get("access_token") or "").strip()
-        if token:
-            return {
-                "token": token,
-                "refresh_token": (j.get("refresh_token") or "").strip(),
-                "expires_in": int(j.get("expires_in") or 0),
-                "uid": str(j.get("douban_user_id") or j.get("uid") or "").strip(),
-                "name": (j.get("douban_user_name") or j.get("name") or "").strip(),
-            }
+        last_code, last_raw, last_status = None, "", 0
+        for url, dev in attempts:
+            data = dict(base)
+            data.update(dev)
+            try:
+                async with httpx.AsyncClient(timeout=20, headers=headers) as hc:
+                    r = await hc.post(url, data=data)
+            except Exception as e:
+                raise DoubanError(-1, f"连不上豆瓣登录服务器（{type(e).__name__}）。"
+                                      f"请检查网络，或稍后再试")
+            try:
+                j = r.json()
+            except Exception:
+                raise DoubanError(r.status_code, f"豆瓣返回了异常内容（HTTP {r.status_code}），"
+                                                 f"请稍后再试")
 
-        code = j.get("code")
-        raw = str(j.get("msg") or "").strip()
+            token = (j.get("access_token") or "").strip()
+            if token:
+                # 换设备号成功的：把新设备号固定下来，后续请求保持一致
+                new_u = (dev.get("udid") or "").strip()
+                if new_u and new_u != udid:
+                    try:
+                        os.makedirs(os.path.dirname(DEVICE_FILE), exist_ok=True)
+                        with open(DEVICE_FILE, "w", encoding="utf-8") as f:
+                            json.dump({"udid": new_u}, f)
+                    except Exception:
+                        pass
+                return {
+                    "token": token,
+                    "refresh_token": (j.get("refresh_token") or "").strip(),
+                    "expires_in": int(j.get("expires_in") or 0),
+                    "uid": str(j.get("douban_user_id") or j.get("uid") or "").strip(),
+                    "name": (j.get("douban_user_name") or j.get("name") or "").strip(),
+                }
+
+            code = j.get("code")
+            raw = str(j.get("msg") or "").strip()
+            last_code, last_raw, last_status = code, raw, r.status_code
+            if code == 120:      # 账号或密码不对，换端点重发没有意义
+                break
+            await asyncio.sleep(0.8)
+
+        code, raw = last_code, last_raw
         friendly = {
             120: "账号或密码不对，请检查后重试（注意不是昵称，是手机号 / 邮箱）",
             113: "豆瓣登录参数异常，请稍后再试",
@@ -245,12 +329,18 @@ class DoubanClient:
         }.get(code)
         if not friendly:
             low = raw.lower()
-            if any(k in low for k in ("captcha", "verify", "sms", "security")):
+            if "invalid_device_id" in low or "device" in low:
+                friendly = ("豆瓣不认可这次登录的设备标识（invalid_device_id）。\n"
+                            "已自动换设备号重试仍未通过，通常是账号开了登录保护 / "
+                            "换设备登录需要验证。\n"
+                            "① 先在手机的豆瓣 App 里正常登录一次，再回来重试；\n"
+                            "② 或改用「手机接力」「粘贴 token」登录")
+            elif any(k in low for k in ("captcha", "verify", "sms", "security")):
                 friendly = ("豆瓣要求安全验证（换设备 / 异地登录常见）。"
                             "请先在手机上打开豆瓣 App 正常使用一次，"
                             "或改用「手机接力」/「粘贴 token」登录")
             else:
-                friendly = raw or f"登录失败（HTTP {r.status_code}）"
+                friendly = raw or f"登录失败（HTTP {last_status}）"
         raise DoubanError(code if isinstance(code, int) else -1, friendly)
 
     async def check_token(self) -> dict:
@@ -412,6 +502,7 @@ class DoubanClient:
             "_ts": ts,
             "_sig": _make_sig(full_path, ts, bearer),
             "os_rom": "android",
+            "udid": _load_udid(),      # 真实客户端每次请求都带，与登录设备号保持一致
         }
         if params:
             query.update(params)

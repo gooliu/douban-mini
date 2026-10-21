@@ -22,7 +22,36 @@ import urllib.request
 
 PROXY = os.environ.get("HTTPS_PROXY") or "http://127.0.0.1:7890"
 API = "https://api.github.com"
-GIT = r"C:\Program Files\Git\cmd\git.exe"
+
+
+def find_git():
+    """自动定位 git.exe：环境变量 → 常见安装路径 → Git Bash 的 mingw64"""
+    import shutil
+    hit = shutil.which("git") or shutil.which("git.exe")
+    if hit:
+        return hit
+    bases = [
+        os.environ.get("ProgramFiles", r"C:\Program Files"),
+        os.environ.get("ProgramFiles(x86)", r"C:\Program Files (x86)"),
+        os.path.join(os.environ.get("LOCALAPPDATA", ""), "Programs"),
+        os.path.join(os.environ.get("USERPROFILE", ""), r".workbuddy\binaries\PortableGit"),
+    ]
+    tails = [r"Git\cmd\git.exe", r"Git\bin\git.exe", r"Git\mingw64\bin\git.exe"]
+    for b in bases:
+        for t in tails:
+            p = os.path.join(b, t)
+            if os.path.isfile(p):
+                return p
+    root = os.path.join(os.environ.get("USERPROFILE", ""), r".workbuddy\binaries\PortableGit\versions")
+    if os.path.isdir(root):
+        for v in sorted(os.listdir(root), reverse=True):
+            p = os.path.join(root, v, r"mingw64\bin\git.exe")
+            if os.path.isfile(p):
+                return p
+    return "git"
+
+
+GIT = find_git()
 REPO_NAME = "douban-mini"
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 _state = {}
@@ -178,15 +207,16 @@ def run(token, private=False, skip_pages=False):
 
     # 用临时 URL 推送，token 不会留在 .git/config 里
     push_url = "https://%s:%s@github.com/%s.git" % (login, token, full)
-    r = run(["push", "-u", "origin", push_url, "main"])
+    info("git 程序: " + GIT)
+    r = run(["push", "-u", push_url, "main"])
     if r.returncode != 0:
         out = (r.stdout or "") + (r.stderr or "")
         if "non-fast-forward" in out or "fetch first" in out:
             warn("远端已有历史，尝试覆盖推送...")
-            run(["push", "-u", "origin", "--force", push_url, "main"])
-            out = (run(["push", "-u", "origin", push_url, "main"]).stderr or "")
-        else:
-            fail("推送失败:\n" + out[-1200:])
+            r = run(["push", "-u", "--force", push_url, "main"])
+            out = (r.stdout or "") + (r.stderr or "")
+        if r.returncode != 0:
+            fail("推送失败:\n" + out[-1500:])
     ok("代码已推送到 main 分支")
     _state["run"] = time.time()
 

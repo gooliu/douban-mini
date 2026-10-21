@@ -100,11 +100,16 @@ def device_login():
 
 if __name__ == "__main__":
     token = ""
-    if "--reauth" not in sys.argv:
+    argv = sys.argv[1:]
+    if "--token" in argv:
+        i = argv.index("--token")
+        if i + 1 < len(argv):
+            token = argv[i + 1].strip()
+    if not token and "--reauth" not in argv:
         cached = load_cached()
         if cached:
             code, data = api("GET", "/user", cached)
-            if code == 200:
+            if code == 200 and (data.get("login") or ""):
                 print("[OK] 复用上次的授权（GitHub 账号: %s）" % data.get("login"), flush=True)
                 token = cached
     if not token:

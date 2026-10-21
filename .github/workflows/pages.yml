@@ -1,9 +1,11 @@
 # 把 web/ 静态前端自动部署到 GitHub Pages
-# 开启方式：仓库 Settings → Pages → Source 选 "GitHub Actions"
+#
+# 首次 push 后会自动开启 Pages（configure-pages 的 enablement），
+# 无需再手动去 Settings → Pages → Source 选 "GitHub Actions"。
 #
 # 可选：在 Settings → Secrets and variables → Actions → Variables 里
 # 加一个 CLOUD_API = https://你的服务.onrender.com
-# 工作流会自动把它写进前端，访问者打开 github.io 地址就能直接用，无需手填后端地址。
+# 工作流会自动把它写进前端；不设则沿用代码里的地址。
 name: Deploy web to GitHub Pages
 
 on:
@@ -16,6 +18,7 @@ permissions:
   pages: write
   id-token: write
 
+# 同一时间只跑一个部署，新的推送取消旧的
 concurrency:
   group: pages
   cancel-in-progress: true
@@ -26,16 +29,28 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - name: 注入云端后端地址
+      - name: 注入云端后端地址（可选）
         run: |
           if [ -n "${{ vars.CLOUD_API }}" ]; then
-            sed -i "s|const DEFAULT_CLOUD_API = '';|const DEFAULT_CLOUD_API = '${{ vars.CLOUD_API }}';|" web/index.html
+            sed -i -E "s|const DEFAULT_CLOUD_API = '[^']*';|const DEFAULT_CLOUD_API = '${{ vars.CLOUD_API }}';|" web/index.html
             echo "已注入后端地址: ${{ vars.CLOUD_API }}"
+            grep -n "DEFAULT_CLOUD_API =" web/index.html | head -1
           else
-            echo "未设置 CLOUD_API，前端将让访问者手动填后端地址"
+            echo "未设置 CLOUD_API，沿用代码里的 DEFAULT_CLOUD_API"
+            grep -n "DEFAULT_CLOUD_API =" web/index.html | head -1
           fi
 
+      - name: 确认入口文件存在
+        run: |
+          test -f web/index.html || { echo "找不到 web/index.html"; exit 1; }
+          ls -la web/
+
       - uses: actions/configure-pages@v5
+        with:
+          # 自动把仓库的 Pages 源设为 GitHub Actions（首次运行即生效）
+          enablement: true
+          token: ${{ secrets.GITHUB_TOKEN }}
+
       - uses: actions/upload-pages-artifact@v3
         with:
           path: web

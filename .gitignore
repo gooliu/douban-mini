@@ -22,3 +22,6 @@ server*.log
 # 隧道运行产物（含地址，不入库）
 tunnel.log
 tunnel_url.txt
+
+# cloudflared 二进制（55MB，不入库）
+tools/bin/

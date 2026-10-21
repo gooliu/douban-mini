@@ -114,16 +114,25 @@ def kill_backend():
         pass
 
 
-def start_backend_public():
-    """以公网隧道模式（强制凭证隔离）启动后端"""
+def _spawn(cmd, env):
+    """启动一个脱离父进程的后台进程（关掉脚本不会把它一起带走）"""
+    kwargs = {"cwd": BACKEND, "env": env, "stdin": subprocess.DEVNULL,
+              "stdout": subprocess.DEVNULL, "stderr": subprocess.DEVNULL}
+    if os.name == "nt":
+        kwargs["creationflags"] = (subprocess.DETACHED_PROCESS |
+                                   subprocess.CREATE_NEW_PROCESS_GROUP)
+    return subprocess.Popen(cmd, **kwargs)
+
+
+def start_backend(public: bool):
+    """启动后端。public=True 时强制要求每个访客自带凭证。"""
     env = dict(os.environ)
-    env["DOUBAN_PUBLIC"] = "1"
-    logf = open(os.path.join(ROOT, "server.log"), "wb")
-    return subprocess.Popen(
-        [find_python(), "-m", "uvicorn", "main:app",
-         "--host", "0.0.0.0", "--port", str(PORT)],
-        cwd=BACKEND, env=env, stdin=subprocess.DEVNULL,
-        stdout=logf, stderr=subprocess.STDOUT)
+    if public:
+        env["DOUBAN_PUBLIC"] = "1"
+    else:
+        env.pop("DOUBAN_PUBLIC", None)
+    return _spawn([find_python(), "-m", "uvicorn", "main:app",
+                   "--host", "0.0.0.0", "--port", str(PORT)], env)
 
 
 def read_local_credential():
@@ -233,8 +242,8 @@ def main():
         else:
             say("[..] 本机后端未运行，正在启动 ...")
         kill_backend()
-        start_backend_public()
-        for i in range(30):
+        start_backend(public=True)
+        for _ in range(30):
             time.sleep(1)
             h = health()
             if h and h.get("public_mode"):
@@ -291,12 +300,31 @@ def main():
     say("=" * 64)
     say("")
 
+    say("")
+    say("  按 Ctrl+C 结束分享。")
     try:
         while proc and proc.poll() is None:
             time.sleep(5)
     except KeyboardInterrupt:
+        pass
+    finally:
         if proc:
-            proc.kill()
+            try:
+                proc.kill()
+            except Exception:
+                pass
+        # 恢复本机模式：隧道关掉后，你自己在本机访问不需要再登录
+        say("[..] 隧道已关闭，正在把后端恢复为本机模式 ...")
+        kill_backend()
+        start_backend(public=False)
+        for _ in range(20):
+            time.sleep(1)
+            h = health()
+            if h and not h.get("public_mode"):
+                say("[OK] 后端已恢复本机模式（你自己访问免登录）")
+                break
+        else:
+            say("[!!] 后端恢复失败，请双击「启动豆瓣查询.bat」")
     return 0
 
 

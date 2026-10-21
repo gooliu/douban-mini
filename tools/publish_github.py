@@ -183,10 +183,14 @@ def run(token, private=False, skip_pages=False):
     print("\n================ 3. 推送代码 ================")
     env = dict(os.environ)
     env["GIT_TERMINAL_PROMPT"] = "0"
+    env["GCM_INTERACTIVE"] = "never"
     env["HTTPS_PROXY"] = env["HTTP_PROXY"] = PROXY
+    # 禁用 Git 凭据管理器：token 已在 URL 里，凭据助手会在后台无限等待输入导致推送卡死
+    GITCFG = ["-c", "credential.helper=", "-c",
+              "http.proxy=" + PROXY, "-c", "https.proxy=" + PROXY]
 
     def run(args_list, **kw):
-        return subprocess.run([GIT] + args_list, cwd=ROOT, env=env,
+        return subprocess.run([GIT] + GITCFG + args_list, cwd=ROOT, env=env,
                               capture_output=True, text=True, encoding="utf-8",
                               errors="replace", **kw)
 
@@ -217,7 +221,9 @@ def run(token, private=False, skip_pages=False):
             out = (r.stdout or "") + (r.stderr or "")
         if r.returncode != 0:
             fail("推送失败:\n" + out[-1500:])
-    ok("代码已推送到 main 分支")
+    # 推送成功后把 remote 改回干净地址，避免 token 留在 .git/config
+    run(["remote", "set-url", "origin", "https://github.com/%s.git" % full])
+    ok("代码已推送到 main 分支（remote 已改回干净地址）")
     _state["run"] = time.time()
 
     if skip_pages:

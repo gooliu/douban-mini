@@ -284,3 +284,15 @@ douban-mini/
 登录凭证只存在访问者自己的浏览器（localStorage），通过请求头
 `X-Douban-Token` / `X-Douban-Cookie` 传递，后端按凭证隔离缓存。
 `backend/douban_config.json` 已被 `.gitignore` 排除，不会进仓库。
+
+### 已上线的地址
+
+| 用途 | 地址 |
+| --- | --- |
+| 代码仓库 | https://github.com/gooliu/douban-mini |
+| 网页（GitHub Pages） | https://gooliu.github.io/douban-mini/ |
+
+网页由 `.github/workflows/pages.yml` 在每次推送 `main` 后自动部署。
+页面内置的后端地址是 `http://211.91.184.194:8000`（家宽公网 IP），
+**需要先在路由器做端口映射**，否则页面顶部会提示「未连接后端」，
+可临时在页面的地址框里手动填后端地址。

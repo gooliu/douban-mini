@@ -16,5 +16,9 @@ if not exist "%PY%" set "PY=C:\Users\73117\.workbuddy\binaries\python\versions\3
 "%PY%" -u tools\tunnel.py
 
 echo.
-echo  隧道已断开。
+echo  隧道已结束，正在把后端恢复为本机模式...
+"%PY%" tools\tunnel.py --restore-local
+
+echo.
+echo  已完成。之后你自己在本机访问不需要再登录。
 pause

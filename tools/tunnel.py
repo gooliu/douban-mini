@@ -221,7 +221,21 @@ def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--provider", default="", choices=["", "localhostrun", "serveo"])
     ap.add_argument("--check", action="store_true")
+    ap.add_argument("--restore-local", action="store_true",
+                    help="把后端恢复为本机模式（直接关窗口没走收尾逻辑时用）")
     args = ap.parse_args()
+
+    if args.restore_local:
+        kill_backend()
+        start_backend(public=False)
+        for _ in range(20):
+            time.sleep(1)
+            h = health()
+            if h and not h.get("public_mode"):
+                say("[OK] 后端已恢复本机模式（你自己访问免登录）")
+                return 0
+        say("[!!] 恢复失败，请双击「启动豆瓣查询.bat」")
+        return 1
 
     if args.check:
         if not os.path.exists(URL_FILE):

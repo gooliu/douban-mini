@@ -18,3 +18,7 @@ backend/probe_*.py
 # 运行日志
 server*.log
 *.log
+
+# 隧道运行产物（含地址，不入库）
+tunnel.log
+tunnel_url.txt

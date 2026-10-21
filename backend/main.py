@@ -45,6 +45,14 @@ app = FastAPI(title="豆瓣小组查询 API", version="1.0.0")
 #   X-Douban-Token / X-Douban-Cookie 头带过来 —— 多人共用一个后端也不会互相看到账号。
 CLOUD_MODE = os.getenv("DOUBAN_CLOUD", "").strip().lower() in ("1", "true", "yes")
 
+# 公网隧道模式（DOUBAN_PUBLIC=1）：通过 localhost.run / serveo 等隧道把本机后端暴露到公网。
+#   此时所有请求到达后端时源 IP 都是 127.0.0.1（由本机 ssh 进程转发出去），
+#   若按 IP 判断是否本机，等于把全世界都当成你自己 —— 必须强制每个访客自带凭证。
+PUBLIC_MODE = os.getenv("DOUBAN_PUBLIC", "").strip().lower() in ("1", "true", "yes")
+
+# 是否信任局域网（信任后家里 WiFi 下的设备可免登录，直接用自己的账号）
+TRUST_LAN = os.getenv("DOUBAN_TRUST_LAN", "").strip().lower() in ("1", "true", "yes")
+
 # 当前请求生效的客户端（默认全局单例；带凭证头时换成临时凭证视图）
 _active_client = contextvars.ContextVar("douban_active_client", default=client)
 
@@ -64,22 +72,48 @@ app.add_middleware(
 )
 
 
+_LOOPBACK = ("127.0.0.1", "::1", "localhost", "::ffff:127.0.0.1")
+
+
+def _client_ip(request) -> str:
+    """取真实客户端 IP。
+
+    经反向代理 / 隧道（localhost.run、serveo、nginx 等）转发时，
+    request.client.host 会变成 127.0.0.1，必须优先看 X-Forwarded-For，
+    否则会把外部访客误判成本机，直接泄露服务端账号。
+    """
+    for key in ("x-forwarded-for", "x-real-ip", "cf-connecting-ip",
+                "true-client-ip", "forwarded"):
+        v = (request.headers.get(key) or "").strip()
+        if not v:
+            continue
+        first = v.split(",")[0].strip()
+        if key == "forwarded" and "for=" in first:
+            first = first.split("for=", 1)[1].split(";")[0].strip().strip('"')
+            if first.startswith("[") and "]" in first:
+                first = first[1:first.find("]")]
+        if first:
+            return first
+    return (request.client.host if request.client else "") or ""
+
+
 def _visitor_must_login(request) -> bool:
     """外部访问者是否必须用自己的凭证登录（避免把服务端保存的账号暴露给别人）
 
     - 云端模式（DOUBAN_CLOUD=1）：永远是，凭证只存访问者浏览器。
+    - 公网隧道模式（DOUBAN_PUBLIC=1）：永远是。隧道转发后源 IP 是 127.0.0.1，
+      若按 IP 判断会把全世界都当成本机，必须强制隔离。
     - 本机模式：只有从 127.0.0.1 / ::1 访问才沿用服务端保存的凭证；
       其他人（含局域网）必须自己登录，看不到服务端账号。
     - 想让局域网设备也免登录，设置 DOUBAN_TRUST_LAN=1。
     """
-    if CLOUD_MODE:
+    if CLOUD_MODE or PUBLIC_MODE:
         return True
-    host = (request.client.host if request.client else "") or ""
-    if host in ("127.0.0.1", "::1", "localhost", "::ffff:127.0.0.1"):
+    host = _client_ip(request)
+    if host in _LOOPBACK:
         return False
-    if os.getenv("DOUBAN_TRUST_LAN", "").strip().lower() in ("1", "true", "yes"):
-        if host.startswith(("192.168.", "10.", "172.")):
-            return False
+    if TRUST_LAN and host.startswith(("192.168.", "10.", "172.")):
+        return False
     return True
 
 
@@ -164,10 +198,12 @@ async def health(request: Request):
         "detail": detail,
         "cooldown": client.cooldown_info(),   # 风控冷却状态（1000 反爬后自动进入）
         "cloud_mode": CLOUD_MODE,        # 云端部署：凭证只存访问者浏览器
+        "public_mode": PUBLIC_MODE,      # 公网隧道：强制每个访客自带凭证
         "need_login": need_login,        # true：必须用你自己的豆瓣账号登录
         "mode": ("共享模式：请用你自己的豆瓣账号登录（不会显示他人账号）"
                  if need_login and status != "valid" else
-                 ("云端共享模式（凭证存你自己浏览器）" if CLOUD_MODE else "本机模式"))
+                 ("云端共享模式（凭证存你自己浏览器）" if CLOUD_MODE else
+                  "公网隧道模式（凭证存你自己浏览器）" if PUBLIC_MODE else "本机模式"))
                 if status != "valid" else
                 "真实数据（本人可查小组/发言）",
     }
@@ -177,6 +213,33 @@ async def health(request: Request):
 async def cooldown():
     """豆瓣风控冷却状态：{cooling, remaining_seconds, hits, via}"""
     return {"ok": True, **client.cooldown_info()}
+
+
+@app.get("/api/local-credential")
+async def local_credential(request: Request):
+    """供「本机浏览器」一键继承服务端已保存的凭证（免重新登录）。
+
+    这是唯一会往外吐凭证的接口，因此校验必须最严格：
+      1) 源地址必须是回环（127.0.0.1 / ::1）；
+      2) 不能带任何转发/代理头 —— 一旦带了，说明请求是经由隧道或反代
+         转发进来的，此时回包会被送给外部访客，必须拒绝。
+    公网隧道模式（DOUBAN_PUBLIC=1）下直接关闭该接口。
+    """
+    if CLOUD_MODE or PUBLIC_MODE:
+        return {"ok": False, "reason": "shared_mode"}
+    host = (request.client.host if request.client else "") or ""
+    if host not in _LOOPBACK:
+        return {"ok": False, "reason": "not_loopback"}
+    for key in ("x-forwarded-for", "x-real-ip", "cf-connecting-ip",
+                "true-client-ip", "forwarded", "via", "x-forwarded-host"):
+        if (request.headers.get(key) or "").strip():
+            return {"ok": False, "reason": "via_proxy"}
+    return {
+        "ok": True,
+        "token": client.token or "",
+        "cookie": client.cookie or "",
+        "self_uid": os.getenv("DOUBAN_SELF_UID", "").strip(),
+    }
 
 
 # --------------------------------------------------------------------

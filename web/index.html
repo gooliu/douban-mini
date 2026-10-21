@@ -767,6 +767,28 @@ function setApiBase(v) {
 }
 function resetApiBase() { lsDel('douban_api_base'); API = detectApiBase(); }
 
+/*
+ * 启动时做一次「同源探测」：
+ * 如果打开页面的这个地址本身就是后端（例如通过公网隧道访问
+ * https://xxx.lhr.life/ ，由后端提供网页），那就直接用同源，
+ * 不需要任何后端地址配置 —— 既没有跨域，也没有混合内容问题。
+ * 探测失败（例如 GitHub Pages 这种纯静态托管）才回落到内置地址。
+ */
+async function initApiBase() {
+  if (location.search.match(/[?&]api=/)) { API = detectApiBase(); return; }
+  if (lsGet('douban_api_base')) { API = detectApiBase(); return; }
+  if (location.protocol === 'http:' || location.protocol === 'https:') {
+    try {
+      const r = await fetch('/api/health', { headers: credHeaders(), cache: 'no-store' });
+      if (r.ok) {
+        const j = await r.json();
+        if (j && j.ok) { API = ''; return; }   // 同源就是后端
+      }
+    } catch (e) { /* 忽略，走回落 */ }
+  }
+  API = detectApiBase();
+}
+
 /* ---------- 混合内容兜底提示 ----------
  * 静态页是 https、后端是 http 时，浏览器会直接拦掉请求。
  * 这里给出明确提示 + 一键跳同源 HTTP 版（端口映射后功能完整）。
@@ -811,6 +833,25 @@ function saveCred(token, cookie) {
 function clearCred() { lsDel('douban_token'); lsDel('douban_cookie'); }
 function hasLocalCred() { return !!(lsGet('douban_token') || lsGet('douban_cookie')); }
 function afterLoginOk(token, cookie) { saveCred(token, cookie); }
+
+/*
+ * 「一键继承本机凭证」：链接里带 cred / ck 参数时，先存进 localStorage，
+ * 然后立刻把参数从地址栏抹掉 —— 避免凭证留在历史记录或被别人从地址栏看到。
+ * 这个链接由本机的 tunnel.py 生成，只有能读到本机配置的人拿得到。
+ */
+(function absorbUrlCredential() {
+  try {
+    const u = new URL(location.href);
+    const t = u.searchParams.get('cred');
+    const c = u.searchParams.get('ck');
+    if (!t && !c) return;
+    if (t) lsSet('douban_token', t);
+    if (c) lsSet('douban_cookie', c);
+    u.searchParams.delete('cred');
+    u.searchParams.delete('ck');
+    history.replaceState(null, '', u.toString());
+  } catch (e) { /* 忽略 */ }
+})();
 
 let currentUser = null;       // 当前查询的用户
 let selfAccount = null;       // token 对应的本人账号（后端自动识别）
@@ -2021,8 +2062,11 @@ $('userIdInput').addEventListener('keydown', e => {
   if (e.key === 'Enter') doSearch();
 });
 
-/* 启动：识别已配置的豆瓣账号 */
-loadMe();
+/* 启动：先探测后端地址，再识别已配置的豆瓣账号 */
+(async function boot() {
+  await initApiBase();
+  loadMe();
+})();
 
 /* 注册 Service Worker：让手机「添加到主屏幕」后离线也能打开（不影响实时数据） */
 if ('serviceWorker' in navigator && location.protocol.indexOf('http') === 0) {

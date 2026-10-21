@@ -25,3 +25,6 @@ tunnel_url.txt
 
 # cloudflared 二进制（55MB，不入库）
 tools/bin/
+server.err
+server.out
+server*.log

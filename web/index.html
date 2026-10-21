@@ -721,7 +721,7 @@
  *   5. 本机默认 http://127.0.0.1:8000
  * 后端带 CORS 允许所有来源，跨域访问没有问题。
  */
-const DEFAULT_CLOUD_API = '';   // ← 部署云端后填 https://你的服务.onrender.com
+const DEFAULT_CLOUD_API = 'http://211.91.184.194:8000';   // ← 后端公网地址（家宽公网 IP + 端口映射）
 
 function lsGet(k) { try { return localStorage.getItem(k); } catch (e) { return null; } }
 function lsSet(k, v) { try { localStorage.setItem(k, v); } catch (e) {} }
@@ -762,6 +762,31 @@ function setApiBase(v) {
   return true;
 }
 function resetApiBase() { lsDel('douban_api_base'); API = detectApiBase(); }
+
+/* ---------- 混合内容兜底提示 ----------
+ * 静态页是 https、后端是 http 时，浏览器会直接拦掉请求。
+ * 这里给出明确提示 + 一键跳同源 HTTP 版（端口映射后功能完整）。
+ */
+(function () {
+  try {
+    if (location.protocol !== 'https:') return;
+    if (!/^http:\/\//i.test(API)) return;
+    window.addEventListener('load', function () {
+      var box = document.createElement('div');
+      box.style.cssText = 'position:fixed;left:0;right:0;top:0;z-index:99999;background:#fff7e6;color:#8a5a00;' +
+        'border-bottom:1px solid #ffd591;padding:10px 14px;font-size:13px;line-height:1.8;' +
+        'box-shadow:0 2px 8px rgba(0,0,0,.08)';
+      box.innerHTML = '⚠️ 当前是 HTTPS 页面，浏览器会拦截对 HTTP 后端（' + API + '）的请求。<br>' +
+        '解决办法二选一：① 点地址栏右侧「锁/盾牌」图标 → 允许加载不安全内容；' +
+        '② <a href="' + API + '/web/" target="_blank" rel="noopener" ' +
+        'style="color:#d46b08;font-weight:600">点这里打开同源 HTTP 版（功能完整，推荐）</a>。' +
+        '<span id="__mcclose" style="float:right;cursor:pointer;font-weight:700">✕</span>';
+      document.body.appendChild(box);
+      var c = document.getElementById('__mcclose');
+      if (c) c.onclick = function () { box.remove(); };
+    });
+  } catch (e) {}
+})();
 
 /* ---------- 凭证（云端共享时只存访问者自己的浏览器）----------
  * 云端后端（Render 等）设了 DOUBAN_CLOUD=1，服务端不保存任何人的凭证；

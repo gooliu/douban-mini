@@ -2099,16 +2099,12 @@ async function renderGroups() {
 
   const priv = !!d.privacy_hidden;
   const claimed = d.claimed_total || 0;
+  if (chkState.uid !== String(currentUser.id)) {     // 换个人就清掉上一轮的候选小组
+    chkState = { groups: [], busy: false, uid: String(currentUser.id) };
+  }
 
-  if (res.source === 'restricted') {
-    // 隐私挡住 —— 直接给排查面板；其它受限情形维持原来的「反查发言」
-    html += priv ? hiddenCheckPanelHtml() : lookupPanelHtml();
-    html += '<div id="notesBoxGroups"></div>';
-    html += '<div id="interestsBox"></div>';
-  } else if (!groups.length) {
-    html += '<div class="empty">没有找到加入的小组</div>';
-    html += '<div id="notesBoxGroups"></div>';
-  } else {
+  /* ① 加入的小组：能拿到就自然列出；拿不到就说明原因 + 声明数量 */
+  if (groups.length) {
     html += `<div class="list-header">加入的小组（${esc(d.total || groups.length)}）</div>`;
     if (claimed && claimed > groups.length) {
       html += `<div class="info-banner" style="background:#fff4e6">
@@ -2131,10 +2127,33 @@ async function renderGroups() {
         </div>
         <div class="g-arrow">›</div>
       </div>`).join('');
-    html += '<div id="notesBoxGroups"></div>';
-    html += `<button class="lp-btn ghost" onclick="toggleChkPanel()">🔍 排查 TA 是否还在别的小组</button>`;
-    html += '<div id="chkSlot"></div>';
+  } else if (!isSelf) {
+    html += `<div class="list-header">加入的小组${claimed ? '（TA 主页显示 ' + esc(claimed) + ' 个）' : ''}</div>`;
+    html += `<div class="chk-desc" style="padding:0 2px 4px">
+      ${priv
+        ? '列表被隐私挡住，取不到具体是哪些组 —— 用下面的「逐个核对」确认 TA 在不在指定小组。'
+        : '暂时没有拿到 TA 的小组列表 —— 用下面的「逐个核对」确认 TA 在不在指定小组。'}
+    </div>`;
+  } else {
+    html += '<div class="empty">没有找到加入的小组</div>';
   }
+
+  /* ② 隐藏小组排查：有列表时收成一个按钮，没列表时直接展开 */
+  if (!isSelf) {
+    if (groups.length) {
+      html += `<button class="lp-btn ghost" onclick="toggleChkPanel()">🔍 排查 TA 是否还在别的小组</button>`;
+      html += '<div id="chkSlot"></div>';
+    } else {
+      html += hiddenCheckPanelHtml();
+    }
+  }
+
+  /* ③ 反查 TA 的发言：始终保留 */
+  if (!isSelf) html += lookupPanelHtml();
+
+  html += '<div id="notesBoxGroups"></div>';
+  if (res.source === 'restricted') html += '<div id="interestsBox"></div>';
+
   box.innerHTML = html;
   mountNotes('notesBoxGroups', currentUser.id, currentUser.name);
   if ($('chkPanel')) renderChkChips();

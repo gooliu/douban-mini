@@ -55,7 +55,9 @@ checks = [
     ("CSS .chk-panel", ".chk-panel {" in html),
     ("CSS .chk-badge.in", ".chk-badge.in {" in html),
     ("POST 调用 check-membership", "/api/check-membership" in script),
-    ("restricted 时挂排查面板", "priv ? hiddenCheckPanelHtml() : lookupPanelHtml()" in script),
+    ("列表拿不到时直接展开排查面板", "html += hiddenCheckPanelHtml();" in script),
+    ("反查发言始终保留（非本人）", "if (!isSelf) html += lookupPanelHtml();" in script),
+    ("加入的小组自然列出", "加入的小组（${esc(d.total || groups.length)}）" in script),
     ("列表页挂排查入口", "toggleChkPanel()" in script),
 ]
 bad = [n for n, ok in checks if not ok]

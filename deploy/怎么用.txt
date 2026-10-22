@@ -1,27 +1,52 @@
 这个包修的是什么
 ────────────────
 以前查别人的「加入的小组」，只要豆瓣不给列表，网站就一律说「TA 把小组设成了隐私」。
-实际有三种情况，现在分开显示了：
+实际有三种情况，现在分开显示：
 
   1) 公开可见   → 正常列出全部小组
-  2) 仅登录可见 → 网页上会写「未登录无法查看更多内容」（你在浏览器里登录豆瓣能看到）
+  2) 仅登录可见 → 网页会写「未登录无法查看更多内容」（你在浏览器登录豆瓣能看到）
   3) 仅自己可见 → 页面直接 404「页面不存在」
 
-207700707 属于第 2 种，所以你会看到「主页明明有小组，网站说隐藏」。
-现在会显示「TA 的小组只对登录用户可见」，并且会拿你自己的豆瓣 Cookie 去试着读一次。
+207700707 属于第 2 种，所以出现「主页明明有小组、网站却说隐藏」。
+现在会显示「TA 的小组只对登录用户可见」，并会拿你自己的豆瓣 Cookie 去试着读一次。
 
-怎么上线
+怎么上线（两种，选一种）
+──────────────────────
+A. 上传 zip（Workbench 上传偶尔报 FileNotFound，失败就换 B）
+   1) 上传 douban-mini-update-登录门槛判定.zip 到 /root
+   2) 终端粘贴这一整段（自动找 zip、解压、跑更新）：
+
+      cd /root && python3 - <<'PY'
+      import zipfile, glob, os
+      home = '/root'
+      hit = None
+      for z in glob.glob(home + '/*.zip'):
+          try:
+              if any(n.startswith('douban-mini-update/') for n in zipfile.ZipFile(z).namelist()):
+                  hit = z; break
+          except Exception:
+              pass
+      if not hit: raise SystemExit('没找到更新包，确认上传成功了吗？')
+      zipfile.ZipFile(hit).extractall(home)
+      print('已解压:', os.path.basename(hit))
+      PY
+      cd /root/douban-mini-update && bash update.sh
+
+B. 走 GitHub（你把这三个文件拖到仓库对应目录的网页上传，再用一条命令拉）
+   仓库：https://github.com/gooliu/douban-mini
+   - backend/main.py、backend/douban_client.py → 打开 /tree/main/backend 上传
+   - web/index.html → 打开 /tree/main/web 上传
+   然后在服务器执行：
+
+      cd /root && rm -rf /root/dbm-new /root/mini.zip && curl -fsSL -o /root/mini.zip https://codeload.github.com/gooliu/douban-mini/zip/refs/heads/main && unzip -q -o /root/mini.zip -d /root/dbm-new && SRC=$(dirname $(dirname $(find /root/dbm-new -path '*/backend/main.py' | head -1))) && docker cp $SRC/backend/main.py douban-mini:/app/backend/main.py && docker cp $SRC/backend/douban_client.py douban-mini:/app/backend/douban_client.py && docker cp $SRC/web/index.html douban-mini:/app/web/index.html && docker restart douban-mini && sleep 10 && docker exec douban-mini sh -c 'grep -c login_required /app/backend/douban_client.py; grep -c "只对登录用户可见" /app/web/index.html' && curl -s -o /dev/null -w "joined-groups -> %{http_code}\n" http://127.0.0.1/api/user/207700707/joined-groups
+
+成功标志
 ────────
-1) 把 douban-mini-update 整个文件夹放到服务器 /root 下（Workbench 上传 zip 也行，传完解压）
-2) 终端里执行：
-
-   cd ~/douban-mini-update && bash 应用更新-登录门槛判定.sh
-
-3) 看到「两行命中数都 >=1、两个接口都是 200」就成功了
-4) 浏览器打开 http://43.108.119.94/ 按 Ctrl+F5 强刷
+最后两行命中数都 >= 1，且 joined-groups 返回 200。
+浏览器打开 http://43.108.119.94/ 按 Ctrl+F5 强刷。
 
 注意
 ────
-* 后端文件变了，脚本会自动 docker restart（约 10 秒打不开是正常的）
-* 数据卷 app-data 不会动，补充记录都在
-* 想回滚：容器里留了 main.py.bak / index.html.bak
+* 后端文件变了，需要 docker restart（约 10 秒打不开属正常）
+* 数据卷 app-data 不动，补充记录都在
+* 容器里留了 main.py.bak / index.html.bak，可回滚

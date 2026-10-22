@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# 国内轻量云服务器一键部署（Ubuntu / Debian / CentOS 通用）
+# 轻量云服务器一键部署（境外 / 国内通用，Ubuntu / Debian / CentOS）
 #
 # 用法（在服务器上执行两行）：
 #   curl -fsSL https://raw.githubusercontent.com/gooliu/douban-mini/main/deploy/一键部署.sh -o install.sh
@@ -9,7 +9,9 @@
 #
 # 可选环境变量：
 #   PORT=80            对外端口（默认 80）
-#   PIP_INDEX_URL=...  pip 镜像源（默认清华源，国内服务器建议保留）
+#   CN_MIRROR=0        1 = 走国内镜像（清华 pip / 阿里云 docker / GitHub 加速）
+#                      0 = 走官方源（境外服务器用这个，默认）
+#   PIP_INDEX_URL=...  手动指定 pip 源，会覆盖 CN_MIRROR 的选择
 
 set -e
 
@@ -19,9 +21,22 @@ warn() { echo -e "${YELLOW}[!]${NC}  $*"; }
 err()  { echo -e "${RED}[X]${NC} $*"; }
 
 PORT="${PORT:-80}"
-PIP_INDEX_URL="${PIP_INDEX_URL:-https://pypi.tuna.tsinghua.edu.cn/simple}"
+CN_MIRROR="${CN_MIRROR:-0}"
 REPO="${REPO:-https://github.com/gooliu/douban-mini.git}"
 DIR="${DIR:-$HOME/douban-mini}"
+
+if [ -z "$PIP_INDEX_URL" ]; then
+  if [ "$CN_MIRROR" = "1" ]; then
+    PIP_INDEX_URL="https://pypi.tuna.tsinghua.edu.cn/simple"
+  else
+    PIP_INDEX_URL="https://pypi.org/simple"
+  fi
+fi
+if [ "$CN_MIRROR" = "1" ]; then
+  GIT_REPO="https://ghfast.top/https://github.com/gooliu/douban-mini.git"
+else
+  GIT_REPO="$REPO"
+fi
 
 echo "=============================================="
 echo " 豆瓣小组查询 · 服务器一键部署"
@@ -32,14 +47,15 @@ if command -v docker >/dev/null 2>&1; then
   say "Docker 已安装：$(docker --version)"
 else
   warn "未检测到 Docker，开始安装（约 1-3 分钟）…"
+  # 国内服务器用阿里云镜像装更快，境外服务器直接走官方脚本
+  DOCKER_MIRROR=""; [ "$CN_MIRROR" = "1" ] && DOCKER_MIRROR="--mirror Aliyun"
   if command -v apt-get >/dev/null 2>&1; then
     apt-get update -qq
     apt-get install -y -qq ca-certificates curl git >/dev/null
-    # 用阿里云镜像装，国内快
-    curl -fsSL https://get.docker.com | bash -s docker --mirror Aliyun
+    curl -fsSL https://get.docker.com | bash -s docker $DOCKER_MIRROR
   elif command -v yum >/dev/null 2>&1; then
     yum install -y -q curl git >/dev/null
-    curl -fsSL https://get.docker.com | bash -s docker --mirror Aliyun
+    curl -fsSL https://get.docker.com | bash -s docker $DOCKER_MIRROR
   else
     err "无法识别的系统，请手动安装 Docker 后重跑本脚本"; exit 1
   fi
@@ -55,9 +71,10 @@ else
   if command -v apt-get >/dev/null 2>&1; then
     apt-get install -y -qq docker-compose-plugin >/dev/null
   else
+    COMPOSE_URL="https://github.com/docker/compose/releases/latest/download/docker-compose-linux-x86_64"
+    [ "$CN_MIRROR" = "1" ] && COMPOSE_URL="https://ghfast.top/$COMPOSE_URL"
     mkdir -p /usr/local/lib/docker/cli-plugins
-    curl -fsSL https://ghfast.top/https://github.com/docker/compose/releases/latest/download/docker-compose-linux-x86_64 \
-      -o /usr/local/lib/docker/cli-plugins/docker-compose
+    curl -fsSL "$COMPOSE_URL" -o /usr/local/lib/docker/cli-plugins/docker-compose
     chmod +x /usr/local/lib/docker/cli-plugins/docker-compose
   fi
   docker compose version >/dev/null 2>&1 || { err "docker compose 安装失败，请手动安装"; exit 1; }
@@ -65,14 +82,27 @@ else
 fi
 
 # ---------- 3. 拉代码 ----------
+# 3a. 如果根目录有上传上来的代码包 zip，先解压（离线部署用）
+for Z in "$HOME"/*.zip "$HOME"/douban-mini*.zip; do
+  [ -f "$Z" ] || continue
+  say "发现上传的代码包 $(basename "$Z")，解压…"
+  command -v unzip >/dev/null 2>&1 || apt-get install -y -qq unzip >/dev/null 2>&1
+  unzip -q -o "$Z" -d "$HOME" && say "解压完成" || warn "解压失败，改用联网下载"
+  break
+done
+
 if [ -d "$DIR/.git" ]; then
   say "目录已存在，更新代码…"
   cd "$DIR" && git pull --ff-only || warn "更新失败，用现有代码继续"
+elif [ -f "$DIR/Dockerfile" ]; then
+  say "检测到已上传的代码目录 $DIR，直接用它部署（无需联网下载代码）"
+  cd "$DIR"
 else
   warn "下载代码到 $DIR …"
-  git clone --depth 1 "$REPO" "$DIR" || {
-    err "git clone 失败（国内服务器访问 GitHub 有时不通）。"
-    echo "    变通办法：在本机打包整个项目为 zip，上传到服务器解压后再跑本脚本。"
+  git clone --depth 1 "$GIT_REPO" "$DIR" || git clone --depth 1 "$REPO" "$DIR" || {
+    err "git clone 失败（服务器访问 GitHub 不通）。"
+    echo "    变通办法 1：CN_MIRROR=1 bash install.sh   （走 GitHub 加速）"
+    echo "    变通办法 2：在本机打包整个项目为 zip，上传到服务器解压后再跑本脚本。"
     exit 1
   }
   say "代码下载完成"

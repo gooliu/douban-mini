@@ -194,6 +194,44 @@
   .sg-item .sg-meta { font-size: 11px; color: #aaa; margin-top: 2px; }
   .sg-item .sg-add { font-size: 12px; color: #42bd56; flex-shrink: 0; padding-left: 10px; }
 
+  /* ---------- 隐藏小组排查 ---------- */
+  .chk-panel { margin: 12px 16px; background: #fff; border-radius: 14px; padding: 16px; }
+  .chk-panel .chk-title { font-size: 15px; font-weight: 600; margin-bottom: 4px; }
+  .chk-panel .chk-desc { font-size: 12px; color: #999; line-height: 1.7; margin-bottom: 12px; }
+  .chk-panel .chk-desc b { color: #666; }
+  .chk-panel label { display: block; font-size: 12px; color: #666; margin: 12px 0 6px; }
+  .chk-panel input {
+    width: 100%; padding: 11px 13px; font-size: 14px;
+    border: 1px solid #e5e5e5; border-radius: 10px; outline: none;
+  }
+  .chk-panel input:focus { border-color: #42bd56; }
+  .chk-picked { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 10px; }
+  .chk-chip {
+    display: inline-flex; align-items: center; gap: 6px; font-size: 12px;
+    background: #f0f7f2; color: #2f9e44; border: 1px solid #d9ecd9;
+    border-radius: 20px; padding: 6px 10px;
+  }
+  .chk-chip .x { font-weight: 700; opacity: .55; cursor: pointer; }
+  .chk-result { margin-top: 14px; }
+  .chk-row {
+    display: flex; align-items: flex-start; gap: 10px;
+    padding: 11px 0; border-bottom: 1px solid #f2f2f2;
+  }
+  .chk-row:last-child { border-bottom: none; }
+  .chk-badge {
+    font-size: 11px; font-weight: 600; padding: 4px 9px; border-radius: 20px;
+    flex-shrink: 0; margin-top: 2px; white-space: nowrap;
+  }
+  .chk-badge.in { background: #e6f6e9; color: #2f9e44; }
+  .chk-badge.out { background: #fdecec; color: #c92a2a; }
+  .chk-badge.unknown { background: #fff4e6; color: #c2410c; }
+  .chk-row .cr-name { font-size: 14px; font-weight: 500; cursor: pointer; }
+  .chk-row .cr-meta { font-size: 11px; color: #aaa; margin-top: 3px; line-height: 1.6; }
+  .chk-summary {
+    font-size: 12px; line-height: 1.8; background: #f7faf7; color: #444;
+    border-radius: 10px; padding: 11px 13px; margin-top: 12px;
+  }
+
   /* 搜索结果页：用户卡片 */
   .user-mini {
     display: flex; align-items: center; gap: 12px; padding: 12px 16px;
@@ -551,25 +589,9 @@
         公开查询（用户资料、小组、他人发帖反查）不用登录。</p>
 
       <div class="modal-tabs">
-        <button type="button" id="tab-pwd" class="active" onclick="switchLoginTab('pwd')">账号密码</button>
+        <button type="button" id="tab-cookie" class="active" onclick="switchLoginTab('cookie')">粘贴 Cookie</button>
         <button type="button" id="tab-token" onclick="switchLoginTab('token')">粘贴 token</button>
         <button type="button" id="tab-handoff" onclick="switchLoginTab('handoff')">手机接力</button>
-        <button type="button" id="tab-cookie" onclick="switchLoginTab('cookie')">网页 Cookie</button>
-      </div>
-
-      <div class="m-pane active" id="pane-pwd">
-        <p class="m-tip"><b>手机上最好用</b>：直接输豆瓣手机号 / 密码，不用抓包、不用开发者工具。</p>
-        <input class="m-input" id="pwdUser" inputmode="email" autocomplete="username"
-               spellcheck="false" placeholder="豆瓣手机号 / 邮箱">
-        <div class="m-pwd">
-          <input class="m-input" id="pwdPass" type="password" autocomplete="current-password"
-                 placeholder="豆瓣密码">
-          <button type="button" class="m-eye" id="pwdEye" onclick="togglePwd()">显示</button>
-        </div>
-        <div class="m-status" id="pwdStatus"></div>
-        <button class="m-primary" id="pwdBtn" onclick="loginByPassword()">登录</button>
-        <p class="m-tip small">🔒 密码只用于向豆瓣换取登录令牌，<b>不保存、不写日志</b>。
-          如果豆瓣提示「需要安全验证」，请改用「手机接力」。</p>
       </div>
 
       <div class="m-pane" id="pane-token">
@@ -604,36 +626,32 @@
         <p class="m-tip small">接力码 5 分钟内有效、只能用一次。</p>
       </div>
 
-      <div class="m-pane" id="pane-cookie">
-        <p class="m-tip"><b>推荐（在这台电脑上）</b>：豆瓣的登录标识 <code>dbcl2</code>
-          是 HttpOnly —— 浏览器里的脚本（含书签）<b>读不到它</b>，所以手机上常报
-          「没读到 dbcl2」。后端和浏览器在同一台机器上时，可以直接读浏览器的登录态。</p>
-        <div class="m-sub2">① 用这个电脑的浏览器登录 douban.com（一次即可）</div>
-        <div class="m-sub2">② 点下面按钮，自动读取并登录</div>
-        <button class="m-primary" id="localCookieBtn" onclick="readLocalCookie()">
-          从本机浏览器读取登录态（一键）</button>
-        <div class="m-status" id="cookieLocalStatus"></div>
-        <div class="m-sub2">手机上：用「一键带回」书签（部分浏览器读不到，见下方说明）</div>
-        <button class="m-primary" id="cookieBmBtn" onclick="copyCookieBookmark()">复制一键登录书签</button>
-        <div class="m-status" id="cookieBmStatus"></div>
-        <div class="m-sub2">② 手机浏览器打开 m.douban.com 登录豆瓣</div>
-        <div class="m-sub2">③ 点刚才保存的书签 → 自动跳回本页并登录</div>
-        <details>
-          <summary>书签怎么用？（iOS / 安卓）</summary>
-          <ol>
-            <li>点上面按钮复制一段以 <code>javascript:</code> 开头的内容。</li>
-            <li>手机浏览器新建一个书签，名称随便（比如「带回豆瓣」），
-                网址<b>粘贴</b>刚才复制的内容（iOS Safari：书签 → 编辑 → 网址）。</li>
-            <li>在已登录的豆瓣页面点这个书签，就会跳回本页并完成登录。</li>
-          </ol>
-        </details>
-        <div class="m-sub2">或者：手动粘贴 Cookie</div>
+      <div class="m-pane active" id="pane-cookie">
+        <p class="m-tip"><b>推荐，手机电脑都能用</b>：把你浏览器里的豆瓣 Cookie 复制过来。
+          豆瓣的登录标识 <code>dbcl2</code> 是 HttpOnly，脚本读不到，
+          所以只能手动复制一次 —— 复制完一直有效，直到你在豆瓣退出登录。</p>
+        <div class="m-sub2">① 浏览器打开 douban.com 并登录你的账号</div>
+        <div class="m-sub2">② 按 F12 →「应用 / Application」→ 左侧 Cookie → douban.com</div>
+        <div class="m-sub2">③ 复制 dbcl2 和 ck 的值，按下面格式粘进输入框</div>
         <textarea id="cookieInput" spellcheck="false"
-                  placeholder='粘贴整段 Cookie，需要包含 dbcl2="..."'></textarea>
+                  placeholder='dbcl2="123456789:AbCdEf"; ck=xxxx'></textarea>
         <div class="m-status" id="cookieStatus"></div>
         <button class="m-primary" id="cookieSaveBtn" onclick="saveCookie()">验证并登录</button>
-        <p class="m-tip small">⚠️ 必须含 <code>dbcl2</code>（豆瓣的登录标识）；
-          无痕窗口 / 另一浏览器的 Cookie 无效。</p>
+        <p class="m-tip small">⚠️ 必须含 <code>dbcl2</code>；多个 Cookie 之间用<b>英文分号</b>隔开，
+          <code>dbcl2</code> 值自带的引号要保留；无痕窗口 / 另一个浏览器的 Cookie 无效。</p>
+        <details>
+          <summary>找不到「应用」在哪？点开看详细步骤</summary>
+          <ol>
+            <li>打开 <b>douban.com</b> 登录 → 按 <b>F12</b>（笔记本按 <b>Fn + F12</b>）。</li>
+            <li>顶部一排标签里选「<b>应用</b>」（英文界面叫 Application；
+                看不到就点最右边的 <code>&gt;&gt;</code>，标签都收在里面）。</li>
+            <li>左边一列找到「<b>存储</b> → Cookie」→ 点 <code>https://www.douban.com</code>。</li>
+            <li>右边出现表格，<b>双击 dbcl2 那一行的值</b>复制，再把 <b>ck</b> 也复制出来。</li>
+            <li>按上面输入框里的格式拼好粘进来，点「验证并登录」。</li>
+          </ol>
+          <p class="m-tip small">手机上没法按 F12：先在<b>电脑上</b>登录成功，
+            再用「<b>手机接力</b>」生成一个 6 位码，手机输入即可。</p>
+        </details>
       </div>
 
       <button class="ghost" onclick="closeTokenModal()">取消</button>
@@ -823,19 +841,22 @@
 
         <div class="lp-section">
           <span class="lp-tag recommend">推荐</span>
-          <b>豆瓣账号密码登录（手机上最好用）</b>
+          <b>粘贴豆瓣 Cookie（手机电脑都能用）</b>
           <div class="lp-step">
-            直接输豆瓣手机号 / 密码即可，<b>不用抓包、不用开发者工具、不用复制 Cookie</b>。
+            浏览器打开 <b>douban.com</b> 登录 → 按 <b>F12</b> →「应用 / Application」
+            → 左侧 Cookie → douban.com → 复制 <code>dbcl2</code> 和 <code>ck</code> 的值粘进来。
           </div>
-          <input class="lp-input" id="lpUser" inputmode="email" autocomplete="username"
-                 spellcheck="false" placeholder="豆瓣手机号 / 邮箱">
-          <input class="lp-input" id="lpPass" type="password" autocomplete="current-password"
-                 placeholder="豆瓣密码" style="margin-top:8px">
-          <button class="lp-big-btn" id="lpPwdBtn" onclick="lpLoginByPassword()">登录</button>
-          <div class="lp-status" id="lpPwdStatus"></div>
-          <div class="lp-step" style="margin-top:8px">🔒 密码只用于向豆瓣换登录令牌，不保存、不写日志。</div>
+          <textarea class="lp-input" id="lpCookieInput" rows="3" spellcheck="false"
+                    placeholder='dbcl2="123456789:AbCdEf"; ck=xxxx'></textarea>
+          <button class="lp-big-btn" id="lpCookieBtn" onclick="lpSaveCookie()">验证并登录</button>
+          <div class="lp-status" id="lpCookieStatus"></div>
+          <div class="lp-step" style="margin-top:8px">
+            ⚠️ 必须含 <code>dbcl2</code>；多个 Cookie 之间用<b>英文分号</b>隔开，
+            <code>dbcl2</code> 值自带的引号要保留。手机上没法按 F12 →
+            先在电脑登录好，再用「手机接力」的 6 位码。
+          </div>
           <div class="lp-step">
-            豆瓣提示「需要安全验证」，或想用电脑的登录态直接给手机用？
+            需要在手机上用，或已经有抓包 token？
             <span class="relink" onclick="openTokenModal('handoff')">用手机接力 / 粘贴 token →</span>
           </div>
         </div>
@@ -879,7 +900,9 @@
       <div class="t-title">说明</div>
       <div class="t-item">· 智能输入：纯数字当 uid；其他自动搜索用户和小组</div>
       <div class="t-item">· 任意用户：公开资料、看过的影视书、小组详情/话题/成员 —— 真实数据</div>
-      <div class="t-item">· 你的账号（已配置 token）：加入的小组、完整发言记录 —— 真实数据</div>
+      <div class="t-item">· 你的账号（已配置 token）：完整发言记录 —— 真实数据</div>
+      <div class="t-item">· <b>他人加入的小组</b>：豆瓣桌面版公开页可直接看，一次拿全量</div>
+      <div class="t-item">· TA 把小组<b>设成隐私</b>时：用「隐藏小组排查」逐个翻候选小组的成员名单核对</div>
       <div class="t-item">· 他人：可用「反查」指定小组，扫描其话题/评论过滤出 TA 的活动</div>
       <div class="t-item scan-link" onclick="openScanView()">⚡ <b>全量扫描小组历史</b>：把候选小组的全部历史话题翻完，
         支持进度、断点续跑、可取消 <span style="color:#2e963a">→ 立即体验</span></div>
@@ -1461,10 +1484,6 @@ async function refreshLoginState() {
     else if (st === 'invalid') setFab('warn', '凭证无效 · 点此更新');
     else setFab('missing', needLogin ? '未登录 · 点此登录' : '未登录');
     $('loginPrompt').style.display = 'block';
-    // 只预填「这个浏览器自己」上次登录过的账号，绝不使用服务端账号
-    const userInput = $('lpUser');
-    const savedUser = lsGet('douban_login_user');
-    if (userInput && !userInput.value && savedUser) userInput.value = savedUser;
   }
   return h;
 }
@@ -1503,34 +1522,38 @@ async function applyApiBase() {
   }
 }
 
-/* ── 未登录引导卡：账号密码直接登录（不依赖弹窗） ── */
-async function lpLoginByPassword() {
-  const user = $('lpUser').value.trim();
-  const pass = $('lpPass').value;
-  const st = $('lpPwdStatus'), btn = $('lpPwdBtn');
-  if (!user || !pass) {
+/* ── 未登录引导卡：直接粘 Cookie 登录（不依赖弹窗） ── */
+async function lpSaveCookie() {
+  const raw = normalizeCookie($('lpCookieInput').value);
+  const st = $('lpCookieStatus'), btn = $('lpCookieBtn');
+  if (!raw) {
     st.className = 'lp-status err';
-    st.textContent = '请填写豆瓣账号和密码';
+    st.textContent = '请先粘贴 Cookie（要包含 dbcl2）';
     return;
   }
-  btn.disabled = true; btn.textContent = '登录中…';
-  st.className = 'lp-status'; st.textContent = '正在向豆瓣验证…';
+  if (!/dbcl2/i.test(raw)) {
+    st.className = 'lp-status err';
+    st.textContent = '❌ 里面没有 dbcl2（豆瓣的登录标识），请先登录 douban.com 再复制';
+    return;
+  }
+  btn.disabled = true; btn.textContent = '验证中…';
+  st.className = 'lp-status'; st.textContent = '正在请求豆瓣校验…';
   try {
-    const r = await fetch(API + '/api/login/password', {
+    const r = await fetch(API + '/api/config/token', {
       method: 'POST', headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ username: user, password: pass }) });
+      body: JSON.stringify({ cookie: raw }) });
     const j = await r.json().catch(() => ({}));
     if (j.ok) {
-      lsSet('douban_login_user', user);
-      if (j.token) saveCred(j.token, '');   // 共享 / 公网模式：凭证只存这个浏览器
-      $('lpPass').value = '';
+      afterLoginOk(j.token || '', j.cookie || raw);
+      selfAccount = { uid: j.uid, name: j.name, avatar: '' };
       st.className = 'lp-status ok';
-      st.textContent = '✅ ' + (j.detail || '登录成功');
-      btn.textContent = '已登录';
-      setTimeout(async () => { await refreshLoginState(); loadMe(); }, 700);
+      st.textContent = '✅ ' + (j.detail || '登录成功')
+                     + (j.cloud ? '（凭证只存在你自己的浏览器里）' : '');
+      btn.textContent = '登录成功';
+      setTimeout(async () => { await refreshLoginState(); loadMe(); }, 900);
     } else {
       st.className = 'lp-status err';
-      st.textContent = '❌ ' + (j.detail || '登录失败');
+      st.textContent = '❌ ' + (j.detail || 'Cookie 无效');
       btn.disabled = false; btn.textContent = '重试';
     }
   } catch (e) {
@@ -1722,12 +1745,15 @@ async function doLogout() {
   }
 }
 
-/* ---------- 登录弹窗：账号密码 / 粘贴 token / 手机接力 ---------- */
-let loginTab = 'pwd';
+/* ---------- 登录弹窗：粘贴 Cookie / 粘贴 token / 手机接力 ----------
+   说明：豆瓣已收紧第三方客户端的密码登录（invalid_device_id），
+   「读取本机浏览器 Cookie」也只在后端与浏览器同机（自用模式）时可用，
+   云端共享模式下必然失败 —— 两条路都已从界面移除，避免误导。 */
+let loginTab = 'cookie';
 
 function switchLoginTab(name) {
-  loginTab = name || 'pwd';
-  ['pwd', 'token', 'handoff', 'cookie'].forEach(k => {
+  loginTab = name || 'cookie';
+  ['cookie', 'token', 'handoff'].forEach(k => {
     const t = $('tab-' + k), p = $('pane-' + k);
     if (t) t.classList.toggle('active', k === loginTab);
     if (p) p.classList.toggle('active', k === loginTab);
@@ -1737,70 +1763,19 @@ function switchLoginTab(name) {
 
 function openTokenModal(tab) {
   $('tokenModal').classList.add('show');
-  ['pwdStatus', 'tokenStatus', 'hoStatus', 'cookieStatus', 'cookieBmStatus',
-   'cookieLocalStatus'].forEach(id => {
+  ['tokenStatus', 'hoStatus', 'cookieStatus'].forEach(id => {
     const el = $(id);
     if (el) { el.textContent = ''; el.className = 'm-status'; }
   });
-  const u = $('pwdUser');
-  if (u && !u.value) u.value = lsGet('douban_login_user') || '';
-  const b = $('pwdBtn');
-  if (b) { b.disabled = false; b.textContent = '登录'; }
   switchLoginTab(tab || loginTab);
   if (loginTab === 'token') setTimeout(() => { const t = $('tokenInput'); if (t) t.focus(); }, 60);
 }
 
 function closeTokenModal() {
   $('tokenModal').classList.remove('show');
-  const p = $('pwdPass'); if (p) p.value = '';
 }
 
-function togglePwd() {
-  const i = $('pwdPass'), b = $('pwdEye');
-  if (!i || !b) return;
-  const show = i.type === 'password';
-  i.type = show ? 'text' : 'password';
-  b.textContent = show ? '隐藏' : '显示';
-}
-
-async function loginByPassword() {
-  const user = ($('pwdUser').value || '').trim();
-  const pass = $('pwdPass').value || '';
-  const st = $('pwdStatus'), btn = $('pwdBtn');
-  if (!user || !pass) {
-    st.className = 'm-status err';
-    st.textContent = '请填写豆瓣账号（手机号 / 邮箱）和密码';
-    return;
-  }
-  btn.disabled = true; btn.textContent = '登录中…';
-  st.className = 'm-status'; st.textContent = '正在向豆瓣验证…';
-  try {
-    const r = await fetch(API + '/api/login/password', {
-      method: 'POST', headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ username: user, password: pass }),
-    });
-    const j = await r.json().catch(() => ({}));
-    if (j.ok) {
-      lsSet('douban_login_user', user);
-      if (j.token) saveCred(j.token, '');   // 共享 / 公网模式：令牌只存这个浏览器
-      $('pwdPass').value = '';
-      st.className = 'm-status ok';
-      st.textContent = '✅ ' + (j.detail || '登录成功');
-      btn.textContent = '已登录';
-      setTimeout(async () => { closeTokenModal(); await refreshLoginState(); loadMe(); }, 700);
-    } else {
-      st.className = 'm-status err';
-      st.textContent = '❌ ' + (j.detail || '登录失败');
-      btn.disabled = false; btn.textContent = '重试';
-    }
-  } catch (e) {
-    st.className = 'm-status err';
-    st.textContent = '❌ 连不上后端（' + API + '）';
-    btn.disabled = false; btn.textContent = '重试';
-  }
-}
-
-/* ---------- 网页 Cookie 登录（手机浏览器可用，走豆瓣 H5 通道）---------- */
+/* ---------- 豆瓣 Cookie 登录（走豆瓣 H5 通道，手机电脑都能用）---------- */
 function normalizeCookie(raw) {
   let c = (raw || '').trim();
   c = c.replace(/^\s*cookie\s*[:=]\s*/i, '');           // 粘成了请求头
@@ -1809,88 +1784,17 @@ function normalizeCookie(raw) {
   return c.replace(/\s*\n\s*/g, ' ').trim();
 }
 
-function cookieBookmarkCode() {
-  const u = new URL(location.href);
-  u.searchParams.delete('cred');
-  u.searchParams.delete('ck');
-  const base = u.toString();
-  const target = base + (base.indexOf('?') >= 0 ? '&' : '?') + 'ck=';
-  // 读不到 dbcl2 时给出**可判断原因**的提示：豆瓣把 dbcl2 设成了 HttpOnly，
-  // 浏览器脚本（含书签）根本读不到，这种情况要引导用户改用别的登录方式。
-  return "javascript:(function(){try{" +
-         "var c=document.cookie||'';" +
-         "if(c.indexOf('dbcl2')>=0){location.href=" + JSON.stringify(target) +
-           "+encodeURIComponent(c);return;}" +
-         "var ns=c.split(';').map(function(s){return (s.split('=')[0]||'').trim();})" +
-           ".filter(function(x){return x;});" +
-         "var has=function(n){return ns.indexOf(n)>=0;};var m;" +
-         "if(!ns.length){m='这个页面读不到任何 Cookie。\\n\\n请确认：'+" +
-           "'① 地址栏是 m.douban.com（不是 App 内置浏览器 / 无痕窗口）；'+" +
-           "'② 这个浏览器已经登录了豆瓣。';}" +
-         "else if(has('bid')||has('ck')){m='豆瓣的登录标识 dbcl2 是 HttpOnly，'+" +
-           "'浏览器脚本读不到（书签这条路走不通，不是你操作错了）。\\n\\n'+" +
-           "'当前读到的 Cookie：'+ns.join(', ')+'\\n\\n请改用：'+" +
-           "'① 电脑上用「从本机浏览器读取」；② 或电脑上登录后用手机接力的 6 位码。';}" +
-         "else{m='没读到豆瓣的登录标识 dbcl2。\\n\\n当前读到的 Cookie：'+ns.join(', ')+" +
-           "'\\n\\n请先在这个浏览器登录 m.douban.com，再点书签。';}" +
-         "alert(m);}catch(e){alert('读取失败：'+e)}})()";
-}
-
-async function readLocalCookie() {
-  const st = $('cookieLocalStatus'), btn = $('localCookieBtn');
-  btn.disabled = true; btn.textContent = '读取中…';
-  st.className = 'm-status';
-  st.textContent = '正在读本机浏览器（Chrome / Edge）的登录态…';
-  try {
-    const r = await fetch(API + '/api/local-cookie', {
-      method: 'POST',
-      headers: Object.assign({ 'Content-Type': 'application/json' }, credHeaders()),
-      body: '{}',
-    });
-    const j = await r.json().catch(() => ({}));
-    if (j.ok) {
-      if (j.cookie) saveCred('', j.cookie);
-      st.className = 'm-status ok';
-      st.textContent = '✅ ' + (j.detail || '已读到登录态') +
-        '。手机上要用：登录弹窗 →「手机接力」→ 输入电脑生成的 6 位码。';
-      setTimeout(async () => { closeTokenModal(); await refreshLoginState(); loadMe(); }, 1200);
-    } else {
-      st.className = 'm-status err';
-      st.textContent = '❌ ' + (j.detail || '没读到豆瓣登录态');
-    }
-  } catch (e) {
-    st.className = 'm-status err';
-    st.textContent = '❌ 连不上后端（' + API + '）';
-  }
-  btn.disabled = false; btn.textContent = '重新读取';
-}
-
-async function copyCookieBookmark() {
-  const code = cookieBookmarkCode();
-  const st = $('cookieBmStatus');
-  try {
-    await navigator.clipboard.writeText(code);
-    st.className = 'm-status ok';
-    st.textContent = '✅ 已复制。手机浏览器新建书签 → 网址粘贴它 → 在豆瓣页面点书签即可';
-  } catch (e) {
-    st.className = 'm-status err';
-    st.textContent = '浏览器不让自动复制，已放到下面的输入框，请手动全选复制：';
-    const ta = $('cookieInput');
-    if (ta) { ta.value = code; ta.focus(); ta.select(); }
-  }
-}
-
 async function saveCookie() {
   const raw = normalizeCookie($('cookieInput').value);
   const st = $('cookieStatus'), btn = $('cookieSaveBtn');
   if (!raw) {
     st.className = 'm-status err';
-    st.textContent = '请先粘贴 Cookie（或在豆瓣页面用书签一键带回）';
+    st.textContent = '请先粘贴 Cookie（要包含 dbcl2）';
     return;
   }
   if (!/dbcl2/i.test(raw)) {
     st.className = 'm-status err';
-    st.textContent = '❌ 里面没有 dbcl2（豆瓣的登录标识），请先登录 m.douban.com 再复制';
+    st.textContent = '❌ 里面没有 dbcl2（豆瓣的登录标识），请先登录 douban.com 再复制';
     return;
   }
   btn.disabled = true; btn.textContent = '验证中…';
@@ -2193,8 +2097,12 @@ async function renderGroups() {
     </div>
     ${banner(res)}`;
 
+  const priv = !!d.privacy_hidden;
+  const claimed = d.claimed_total || 0;
+
   if (res.source === 'restricted') {
-    html += lookupPanelHtml();
+    // 隐私挡住 —— 直接给排查面板；其它受限情形维持原来的「反查发言」
+    html += priv ? hiddenCheckPanelHtml() : lookupPanelHtml();
     html += '<div id="notesBoxGroups"></div>';
     html += '<div id="interestsBox"></div>';
   } else if (!groups.length) {
@@ -2202,25 +2110,44 @@ async function renderGroups() {
     html += '<div id="notesBoxGroups"></div>';
   } else {
     html += `<div class="list-header">加入的小组（${esc(d.total || groups.length)}）</div>`;
+    if (claimed && claimed > groups.length) {
+      html += `<div class="info-banner" style="background:#fff4e6">
+        <div class="ib-title">有 ${claimed - groups.length} 个小组被折叠了</div>
+        TA 的主页显示加入了 ${esc(claimed)} 个小组，页面上只列出 ${groups.length} 个
+        —— 豆瓣会按隐私/热度折叠一部分。想知道 TA 在不在某个具体小组，用下面的排查。</div>`;
+    }
     html += groups.map(g => `
       <div class="group-item" onclick="renderGroupTopics('${esc(g.id)}', '${esc(g.name)}')">
         <div class="g-icon">${esc((g.name || '?')[0])}</div>
         <div class="g-body">
-          <div class="g-name">${esc(g.name)}</div>
+          <div class="g-name">${esc(g.name)}${g.managed
+            ? ' <span style="font-size:11px;color:#c2410c">（TA 创建/管理）</span>' : ''}</div>
           <div class="g-desc">${esc(g.desc || '')}</div>
           <div class="g-meta">
             ${g.category ? `<span class="g-tag">${esc(g.category)}</span>` : ''}
             <span>${esc(g.member_count)} 成员</span>
-            <span>· 创建于 ${esc((g.create_time || '').slice(0, 10))}</span>
+            ${g.create_time ? `<span>· 创建于 ${esc((g.create_time || '').slice(0, 10))}</span>` : ''}
           </div>
         </div>
         <div class="g-arrow">›</div>
       </div>`).join('');
     html += '<div id="notesBoxGroups"></div>';
+    html += `<button class="lp-btn ghost" onclick="toggleChkPanel()">🔍 排查 TA 是否还在别的小组</button>`;
+    html += '<div id="chkSlot"></div>';
   }
   box.innerHTML = html;
   mountNotes('notesBoxGroups', currentUser.id, currentUser.name);
+  if ($('chkPanel')) renderChkChips();
   if (res.source === 'restricted') loadInterests(currentUser.id);
+}
+
+function toggleChkPanel() {
+  const slot = $('chkSlot');
+  if (!slot) return;
+  if (slot.innerHTML.trim()) { slot.innerHTML = ''; return; }
+  slot.innerHTML = hiddenCheckPanelHtml();
+  renderChkChips();
+  slot.scrollIntoView({ behavior: 'smooth', block: 'start' });
 }
 
 /* ---------- 视图3a：用户发言记录 ---------- */
@@ -3036,6 +2963,206 @@ function pickGroup(gid) {
   const list = (el.value || '').replace(/[，、\s]+/g, ',').split(',').filter(Boolean);
   if (list.indexOf(gid) < 0) list.push(gid);
   el.value = list.slice(0, 8).join(',');
+}
+
+/* ================= 隐藏小组排查 =================
+   TA 的小组列表被隐私挡住时的替代方案：给候选小组，翻成员名单核对 uid。
+
+   判定口径必须如实传达给用户：
+     ✅ 命中     → 确定在组内
+     ❌ 已翻完   → 确定不在组内（成员数 <= 已扫描数）
+     ⚠️ 未见其人 → 不确定，只代表已翻的那部分里没有 TA
+================================================== */
+let chkState = { groups: [], busy: false };
+let chkSearchCache = {};
+
+function hiddenCheckPanelHtml() {
+  return `
+    <div class="chk-panel" id="chkPanel">
+      <div class="chk-title">🔍 隐藏小组排查</div>
+      <div class="chk-desc">
+        TA 的小组列表拿不到时，改成「逐个核对」：给出候选小组，我翻每个小组的<b>成员名单</b>找 TA 的 uid。<br>
+        <b>✅ 命中</b> = 确定在组内；<b>❌ 翻完</b> = 确定不在；
+        <b>⚠️ 未见其人</b> = 只说明已翻的那部分里没有 TA。
+      </div>
+      <div class="chk-picked" id="chkChips"></div>
+      <div class="lp-row" style="margin-top:12px">
+        <div><input id="chkGidInput" placeholder="输入候选小组 id，逗号分隔，如 146409,736218"></div>
+        <div style="width:auto"><button class="lp-btn"
+          style="margin-top:0;padding:11px 18px;width:auto" onclick="addChkFromInput()">添加</button></div>
+      </div>
+      <label>扫描深度（每个小组最多翻多少成员）</label>
+      <div class="lp-row">
+        <div>
+          <select id="chkDepth" style="width:100%;padding:11px 13px;font-size:14px;
+                   border:1px solid #e5e5e5;border-radius:10px;background:#fff">
+            <option value="1000">快速 · 每组 1000 人</option>
+            <option value="3000" selected>标准 · 每组 3000 人</option>
+            <option value="10000">深入 · 每组 10000 人</option>
+            <option value="30000">极限 · 每组 30000 人（很慢）</option>
+          </select>
+        </div>
+      </div>
+      <button class="lp-btn ghost" onclick="toggleChkSearch()">不知道小组 id？按关键词搜索小组</button>
+      <div id="chkSgBox" style="display:none">
+        <div class="lp-row" style="margin-top:10px">
+          <div><input id="chkSgQuery" placeholder="输入小组关键词，如 上海租房"></div>
+          <div style="width:auto"><button class="lp-btn"
+            style="margin-top:0;padding:11px 18px;width:auto" onclick="doChkSearchGroup()">搜索</button></div>
+        </div>
+        <div id="chkSgResult"></div>
+      </div>
+      <button class="lp-btn" id="chkBtn" onclick="doCheckMembership()">开始排查</button>
+      <div class="chk-result" id="chkResult"></div>
+      <div class="lp-hint">
+        成员名单按加入顺序排列，越早加入越靠前，命中时会告诉你排在第几位。<br>
+        小群（几千人以内）能 100% 翻完，给出的是确定结论；大组只能提高覆盖率，
+        别把「没找到」当成「不在」。
+      </div>
+    </div>`;
+}
+
+function toggleChkSearch() {
+  const b = $('chkSgBox');
+  b.style.display = (b.style.display === 'none') ? 'block' : 'none';
+}
+
+function renderChkChips() {
+  const box = $('chkChips');
+  if (!box) return;
+  if (!chkState.groups.length) {
+    box.innerHTML = '<span style="font-size:12px;color:#aaa">还没有候选小组</span>';
+    return;
+  }
+  box.innerHTML = chkState.groups.map(g => `
+    <span class="chk-chip">${esc(g.name || ('小组 ' + g.id))}
+      <span class="x" onclick="removeChkGroup('${esc(g.id)}')">×</span>
+    </span>`).join('');
+}
+
+function addChkGroups(pairs) {
+  const seen = new Set(chkState.groups.map(g => g.id));
+  pairs.forEach(p => {
+    if (p.id && !seen.has(p.id)) { seen.add(p.id); chkState.groups.push(p); }
+  });
+  renderChkChips();
+}
+
+function addChkFromInput() {
+  const raw = ($('chkGidInput').value || '').replace(/[，、\s]+/g, ',');
+  const ids = raw.split(',').filter(Boolean);
+  if (!ids.length) return;
+  addChkGroups(ids.map(id => ({ id, name: '' })));
+  $('chkGidInput').value = '';
+}
+
+function removeChkGroup(gid) {
+  chkState.groups = chkState.groups.filter(g => g.id !== gid);
+  renderChkChips();
+}
+
+async function doChkSearchGroup() {
+  const q = ($('chkSgQuery').value || '').trim();
+  const box = $('chkSgResult');
+  if (!q) { box.innerHTML = '<div class="lp-hint">请输入关键词</div>'; return; }
+  box.innerHTML = '<div class="lp-hint">搜索中…</div>';
+  try {
+    const res = await api('/api/search/group?q=' + encodeURIComponent(q) + '&count=15');
+    const gs = (res.data || {}).groups || [];
+    if (!gs.length) { box.innerHTML = '<div class="lp-hint">没有找到相关小组</div>'; return; }
+    gs.forEach(g => { chkSearchCache[g.id] = g.name; });
+    box.innerHTML = '<div style="margin-top:8px">' + gs.map(g => `
+      <div class="sg-item" onclick="pickChkGroup('${esc(g.id)}')">
+        <div>
+          <div class="sg-name">${esc(g.name)}</div>
+          <div class="sg-meta">${esc(g.member_count || 0)} 成员 · id ${esc(g.id)}</div>
+        </div>
+        <div class="sg-add">+ 加入候选</div>
+      </div>`).join('') + '</div>';
+  } catch (e) {
+    box.innerHTML = '<div class="lp-hint">' + esc(e.message) + '</div>';
+  }
+}
+
+function pickChkGroup(gid) {
+  addChkGroups([{ id: gid, name: chkSearchCache[gid] || '' }]);
+}
+
+async function doCheckMembership() {
+  if (chkState.busy) return;
+  if (!chkState.groups.length) {
+    $('chkResult').innerHTML =
+      '<div class="info-banner">请先添加至少 1 个候选小组（可直接填 id，或用关键词搜索）</div>';
+    return;
+  }
+  if (!currentUser || !currentUser.id) {
+    $('chkResult').innerHTML = '<div class="info-banner">请先查询一个用户</div>';
+    return;
+  }
+  const btn = $('chkBtn');
+  const depth = parseInt(($('chkDepth') || {}).value || '3000', 10);
+  chkState.busy = true;
+  btn.disabled = true;
+  btn.textContent = '正在翻成员名单，请稍候…';
+  $('chkResult').innerHTML =
+    '<div class="empty">正在核对 ' + chkState.groups.length + ' 个小组的成员名单…</div>';
+
+  try {
+    const res = await fetch(API + '/api/check-membership', {
+      method: 'POST',
+      headers: Object.assign({ 'Content-Type': 'application/json' }, credHeaders()),
+      body: JSON.stringify({
+        user_id: String(currentUser.id),
+        groups: chkState.groups.map(g => g.id),
+        max_members: depth,
+      }),
+    });
+    const j = await res.json().catch(() => ({}));
+    if (!res.ok || !j.ok) throw new Error(j.detail || j.message || ('HTTP ' + res.status));
+    renderChkResult(j);
+  } catch (e) {
+    $('chkResult').innerHTML = '<div class="info-banner">' + esc(e.message) + '</div>';
+  } finally {
+    chkState.busy = false;
+    btn.disabled = false;
+    btn.textContent = '开始排查';
+  }
+}
+
+function renderChkResult(res) {
+  const d = res.data || {};
+  const rows = d.results || [];
+  const badge = {
+    in:      ['✅ 在组内', 'in'],
+    out:     ['❌ 确定不在', 'out'],
+    unknown: ['⚠️ 未见其人', 'unknown'],
+  };
+  let html = '';
+  rows.forEach(r => {
+    const [txt, cls] = badge[r.verdict] || badge.unknown;
+    let meta = '';
+    if (r.verdict === 'in') {
+      meta = `成员名单第 ${r.hit_at + 1} 位命中 · 该组共 ${r.total} 人 · 翻了 ${r.pages} 页`;
+    } else if (r.verdict === 'out') {
+      meta = `已翻完全部 ${r.total} 名成员，没有 TA · 这是确定结论`;
+    } else {
+      meta = `该组共 ${r.total} 人，只翻了 ${r.scanned} 人（覆盖 ${r.coverage_pct}%）`
+           + ` —— 没找到不代表不在`;
+    }
+    html += `
+      <div class="chk-row">
+        <span class="chk-badge ${cls}">${txt}</span>
+        <div>
+          <div class="cr-name" onclick="renderGroupTopics('${esc(r.group_id)}','${esc(r.group_name || '')}')">
+            ${esc(r.group_name || ('小组 ' + r.group_id))}</div>
+          <div class="cr-meta">${esc(meta)}</div>
+        </div>
+      </div>`;
+  });
+  if (res.message) {
+    html += '<div class="chk-summary">' + esc(res.message) + '</div>';
+  }
+  $('chkResult').innerHTML = html || '<div class="empty">没有拿到结果</div>';
 }
 
 async function doReverseLookup() {

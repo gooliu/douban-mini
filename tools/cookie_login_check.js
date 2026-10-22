@@ -1,8 +1,7 @@
 /* Cookie 登录通道自检（手机视口）：
-   1) 登录弹窗「网页 Cookie」tab 有「从本机浏览器读取」按钮
-   2) 一键书签脚本语法合法，且读不到 dbcl2 时给出可判断原因的提示（HttpOnly）
-   3) 点「从本机浏览器读取」→ 后端给出中文结果（无 JS 报错）
-   4) 接力码能带 cookie（接口层已支持，这里只验前端不报错）
+   1) 登录弹窗默认停在「粘贴 Cookie」，密码登录 / 一键读取 / 书签入口都已移除
+   2) 粘贴缺少 dbcl2 的 Cookie、空输入时都给出明确中文提示
+   3) 未登录引导卡上也有同样的粘贴框（lpCookieInput）
    仅开发期自检用。 */
 const { spawn } = require('child_process');
 const fs = require('fs');
@@ -90,42 +89,26 @@ function httpJson(url) {
     return v;
   };
 
-  // 打开弹窗 → cookie tab
+  // 打开弹窗 → 默认就是「粘贴 Cookie」
   await evalJs(`document.getElementById('loginFab').click()`);
   await sleep(300);
-  await evalJs(`switchLoginTab('cookie')`);
-  await sleep(300);
-  await check('Cookie tab 激活', `document.getElementById('pane-cookie').classList.contains('active')`);
-  await check('有本机浏览器读取按钮', `!!document.getElementById('localCookieBtn')`);
-  await check('按钮文案', `(document.getElementById('localCookieBtn').textContent||'').trim().slice(0,20)`);
+  await check('默认激活 Cookie 面板', `document.getElementById('pane-cookie').classList.contains('active')`);
+  await check('密码登录入口已移除', `!document.getElementById('tab-pwd') && !document.getElementById('pane-pwd')`);
+  await check('一键读取按钮已移除', `!document.getElementById('localCookieBtn') && !document.getElementById('cookieBmBtn')`);
+  await check('有粘贴框', `!!document.getElementById('cookieInput')`);
+  await check('引导卡也有粘贴框', `!!document.getElementById('lpCookieInput')`);
 
-  // 书签脚本：语法 + 分支提示
-  await check('书签脚本前缀', `cookieBookmarkCode().slice(0, 11)`);
-  await check('书签脚本可解析', `(()=>{try{new Function(cookieBookmarkCode().replace(/^javascript:/,''));return 'ok'}catch(e){return String(e)}})()`);
-  await check('无 dbcl2（有 bid/ck）提示含 HttpOnly', `(()=>{
-    window.__alertMsg=''; window.alert = (m)=>{window.__alertMsg=m;};
-    Object.defineProperty(document,'cookie',{get:()=>'bid=abcdef; ck=xy',configurable:true});
-    eval(cookieBookmarkCode().replace(/^javascript:/,''));
-    return window.__alertMsg;
-  })()`);
-  await check('无 cookie 提示引导登录', `(()=>{
-    window.__alertMsg=''; window.alert = (m)=>{window.__alertMsg=m;};
-    Object.defineProperty(document,'cookie',{get:()=>'',configurable:true});
-    eval(cookieBookmarkCode().replace(/^javascript:/,''));
-    return window.__alertMsg;
-  })()`);
-  await check('有 dbcl2 则跳转', `(()=>{
-    window.__href=''; window.alert=(m)=>{};
-    Object.defineProperty(document,'cookie',{get:()=>'dbcl2="1:abc"; ck=x',configurable:true});
-    try{ eval(cookieBookmarkCode().replace(/^javascript:/,'')); }catch(e){ return 'threw:'+e; }
-    return location.href.indexOf('ck=')>=0 ? 'redirected' : 'no-redirect';
-  })()`);
+  // 缺少 dbcl2 / 空输入 → 给出明确中文提示
+  await evalJs(`document.getElementById('cookieInput').value='bid=abc; ck=x'`);
+  await evalJs(`saveCookie()`);
+  await sleep(1500);
+  await check('缺 dbcl2 的提示', `document.getElementById('cookieStatus').textContent`);
   await shot('cookie_tab_1.png');
 
-  // 本机浏览器读取（后端会给出中文结果/失败原因）
-  await evalJs(`document.getElementById('localCookieBtn').click()`);
-  await sleep(4000);
-  await check('本机读取结果', `document.getElementById('cookieLocalStatus').textContent`);
+  await evalJs(`document.getElementById('cookieInput').value=''`);
+  await evalJs(`saveCookie()`);
+  await sleep(800);
+  await check('空输入提示', `document.getElementById('cookieStatus').textContent`);
   await shot('cookie_tab_2.png');
 
   // 注意：process.exit 会丢掉未 flush 的 stdout，所以同步写文件

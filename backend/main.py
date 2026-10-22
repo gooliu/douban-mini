@@ -11,15 +11,18 @@
     DOUBAN_CACHE_TTL  缓存秒数（默认 600）
     DOUBAN_SCAN_GROUPS  扫描发言记录时最多遍历的小组数（默认 8）
 
-数据能力矩阵（实测 2026-10）:
+数据能力矩阵（实测 2026-10-22 修订）:
     任意用户: 公开资料 / 兴趣(看过影视书) / 小组详情 / 小组话题 / 小组成员 / 小组搜索 -> 真实数据
-    token 本人: 加入的小组(joined_groups) / 完整发言(posted_topics) -> 真实数据
-    其他用户: 加入的小组 -> 豆瓣无任何可用接口，返回 source=restricted 并说明原因
-    其他用户: 发言记录 -> 无法直接查询，但可用「反查」：给定候选小组 id 扫描其话题过滤作者
-    未配置 DOUBAN_TOKEN: 受限接口返回演示数据（source=mock）
+    他人加入的小组: 桌面版公开页 www.douban.com/group/people/:uid/joins -> 真实数据，**匿名一次拿全量**
+                    （TA 设为隐私时该页返回 404，改用 check_uid_in_group 逐个核对）
+    token 本人: 加入的小组(joined_groups，字段更全) / 完整发言(posted_topics) -> 真实数据
+    他人是否在某小组: 翻该小组成员名单比对 uid（check_uid_in_group）
+                    小群可 100% 确定；大组只给覆盖率，"没找到"不等于"不在"
+    他人发言/回帖: 用「反查」——给定候选小组 id 扫描话题/评论过滤作者
 """
 from __future__ import annotations
 
+import asyncio
 import contextvars
 import json as _json
 import os
@@ -669,50 +672,206 @@ async def get_user(user_id: str = Path(description="豆瓣用户数字 uid 或�
     })
 
 
+async def _www_joined(user_id: str) -> dict:
+    """抓桌面版公开页面取「他人加入的小组」（匿名可读，一次拿全量）
+
+    返回 None 表示该用户把小组设为隐私 / 用户不存在 / 被反爬，由调用方处理。
+    """
+    return await _c().fetch_joined_groups_www(str(user_id))
+
+
 @app.get("/api/user/{user_id}/groups", response_model=Resp)
 async def get_user_groups(user_id: str, start: int = 0, count: int = Query(50, le=100)):
     """用户加入的小组
 
-    - 配置 token 且 user_id == token 本人: 真实数据（frodo joined_groups）
-    - 配置 token 但查的是别人: 豆瓣返回 403，此处明确告知（source=restricted）
-    - 未配置 token: 演示数据
+    三条通道按优先级尝试（2026-10 实测）：
+      1. 桌面版公开页 www.douban.com/group/people/:uid/joins  ← **他人也可用，匿名可读**
+         实测一次性返回全部小组（163 组一次到位），只要你查的人没把小组设为隐私。
+      2. frodo joined_groups（需登录，且仅限 token 本人）——字段更丰富（简介/分类/创建时间）
+      3. 都没有 → restricted，并引导用「指定小组排查」逐个验证
     """
-    if not _c().token:
-        return Resp(ok=True, source="restricted", data={"total": 0, "groups": []},
-                    message="未登录：豆瓣「加入的小组」只有本人登录态才能查。"
-                            "点右上角「登录」粘贴豆瓣 token 后再查本人即可；"
-                            "查他人请改用「反查发言」")
-
     self_uid = await _self_uid()
-    if self_uid and str(user_id) != str(self_uid):
+    is_self = bool(self_uid and str(user_id) == str(self_uid))
+
+    # 本人且有登录态 → 走 frodo，字段更全
+    if is_self and _c().token:
+        try:
+            g = await _c().get_joined_groups(user_id, start, count)
+        except DoubanError as e:
+            if e.code == 103:
+                return Resp(ok=True, source="restricted", data={"total": 0, "groups": []},
+                            message="登录已失效（豆瓣 code=103）：请点右上角「登录」重新粘贴豆瓣 token，"
+                                    "更新后立即生效，无需重启服务")
+            if e.code == 1000:
+                pass            # 落到下面的公开页通道
+            else:
+                raise _err(e)
+        else:
+            groups = [{
+                "id": x.get("id"),
+                "name": x.get("name"),
+                "member_count": x.get("member_count"),
+                "create_time": x.get("create_time"),
+                "desc": x.get("desc_abstract") or x.get("desc", ""),
+                "category": (x.get("category") or {}).get("title", "")
+                if isinstance(x.get("category"), dict) else "",
+                "url": x.get("url"),
+            } for x in g.get("groups", [])]
+            return Resp(ok=True, source="douban",
+                        data={"total": g.get("total", len(groups)), "groups": groups})
+
+    # 他人 / 未登录：桌面版公开页（匿名可读，实测可用）
+    www = await _www_joined(user_id)
+    if www.get("status") == "ok":
+        joined = www["groups"] + www["managed"]
+        claimed = 0
+        try:
+            claimed = (await _c().get_user(str(user_id))).get("joined_group_count", 0)
+        except DoubanError:
+            pass
+        groups = [{"id": x["id"], "name": x["name"], "member_count": x["member_count"],
+                   "desc": "", "category": "", "create_time": "",
+                   "managed": x.get("section", "").find("管理") >= 0}
+                  for x in joined]
+        note = ""
+        if claimed and len(groups) < claimed:
+            note = f"（主页显示 {claimed} 个，这里列出 {len(groups)} 个，其余被豆瓣按隐私折叠）"
+        return Resp(
+            ok=True, source="douban",
+            data={"total": len(groups), "groups": groups,
+                  "claimed_total": claimed,
+                  "managed_count": len(www["managed"]),
+                  "hidden": claimed and len(groups) < claimed},
+            message=f"来自豆瓣桌面版公开页（匿名可读）{note}")
+
+    if www.get("status") == "blocked":
         return Resp(ok=True, source="restricted", data={"total": 0, "groups": []},
-                    message=f"豆瓣不提供「他人加入的小组」接口（已实测 frodo / 移动网页版 / rexxar "
-                            f"全部不可用），只能查 token 本人（uid {self_uid}）。"
-                            f"替代方案：用「反查发言」看 TA 在指定小组的发帖，"
-                            f"或用小组搜索按关键词找到小组 id")
+                    message="豆瓣网页暂时拒绝了这次请求（反爬 403/429）。"
+                            "等一两分钟再刷新一次就好，不用换账号。")
+
+    if www.get("status") == "missing":
+        return Resp(ok=False, source="restricted", data={"total": 0, "groups": []},
+                    message=f"豆瓣上没有 uid 为 {user_id} 的用户（页面返回「页面不存在」）。"
+                            "确认一下 uid 有没有输错。")
+
+    # hidden：该用户把小组设为隐私 —— 这正是需要「逐个排查」的场景
+    return Resp(
+        ok=True, source="restricted",
+        data={"total": 0, "groups": [], "privacy_hidden": True},
+        message="TA 把小组设成了隐私 —— 豆瓣会直接把这个页面变成「页面不存在」，"
+                "任何人（含 App 接口）都拉不到完整列表。"
+                "想知道 TA 在不在某个具体小组，用下面的「隐藏小组排查」："
+                "给出候选小组，我逐个翻成员名单核对。")
+
+
+@app.get("/api/user/{user_id}/joined-groups", response_model=Resp)
+async def get_user_joined_groups(user_id: str):
+    """【他人加入的小组】桌面版公开页抓取（匿名可读，一次拿全量）
+
+    与 /api/user/{id}/groups 的区别：本接口**只走公开页**，不掺 frodo 结果，
+    因此前后行为一致；并额外返回「加入 / 管理」两类分组与隐私状态。
+    """
+    www = await _www_joined(user_id)
+    claimed = 0
     try:
-        g = await _c().get_joined_groups(user_id, start, count)
-    except DoubanError as e:
-        if e.code == 103:
-            return Resp(ok=True, source="restricted", data={"total": 0, "groups": []},
-                        message="登录已失效（豆瓣 code=103）：请点右上角「登录」重新粘贴豆瓣 token，"
-                                "更新后立即生效，无需重启服务")
-        if e.code == 1000:
-            return Resp(ok=True, source="restricted", data={"total": 0, "groups": []},
-                        message=f"豆瓣拒绝访问（need_permission）：该接口仅允许查询 token 本人"
-                                f"（uid {self_uid or '未知'}）加入的小组")
-        raise _err(e)
-    groups = [{
-        "id": x.get("id"),
-        "name": x.get("name"),
-        "member_count": x.get("member_count"),
-        "create_time": x.get("create_time"),
-        "desc": x.get("desc_abstract") or x.get("desc", ""),
-        "category": (x.get("category") or {}).get("title", "") if isinstance(x.get("category"), dict) else "",
-        "url": x.get("url"),
-    } for x in g.get("groups", [])]
+        claimed = (await _c().get_user(str(user_id))).get("joined_group_count", 0)
+    except DoubanError:
+        pass
+
+    if www["status"] != "ok":
+        msg = {
+            "hidden": "TA 把小组设成了隐私，豆瓣把列表页变成了「页面不存在」，"
+                      "匿名和 App 接口都拿不到。请改用「隐藏小组排查」逐个核对。",
+            "missing": f"豆瓣上没有 uid 为 {user_id} 的用户。",
+            "blocked": "豆瓣网页暂时拒绝了请求（反爬），稍等一两分钟再试。",
+        }.get(www["status"], "未能获取该用户的小组列表。")
+        return Resp(ok=True, source="restricted",
+                    data={"status": www["status"], "groups": [], "managed": [],
+                          "claimed_total": claimed}, message=msg)
+
     return Resp(ok=True, source="douban",
-                data={"total": g.get("total", len(groups)), "groups": groups})
+                data={"status": "ok",
+                      "groups": www["groups"],
+                      "managed": www["managed"],
+                      "claimed_total": claimed,
+                      "listed_total": len(www["groups"]) + len(www["managed"]),
+                      "complete": claimed == 0 or
+                                  claimed == len(www["groups"]) + len(www["managed"])})
+
+
+class MembershipIn(BaseModel):
+    user_id: str
+    groups: list[str] = []
+    max_members: int = 3000       # 每个小组最多翻多少条成员（100 条/次请求）
+
+
+@app.post("/api/check-membership", response_model=Resp)
+async def check_membership(body: MembershipIn):
+    """【隐藏小组排查】逐个翻候选小组的成员名单，核对某 uid 是否在组内
+
+    判定口径（务必如实呈现给用户）：
+      ✅ 命中        → 100% 确定在组内（成员名单里找到了 TA）
+      ❌ 已翻完      → 100% 确定**不在**组内（成员数 ≤ 已扫描数，全量比对过）
+      ⚠️ 未见其人    → 不确定。只说明在已翻的那部分里没有 TA，
+                       大组动辄几十万人，覆盖率会很低，不能当作「不在」
+
+    max_members 建议：小群用默认 3000 即可全量；超大组调到 10000 也只是提高覆盖率。
+    """
+    groups = [g.strip() for g in body.groups if str(g).strip()]
+    if not groups:
+        return Resp(ok=False, source="none", message="请至少提供 1 个候选小组 id")
+    if len(groups) > 12:
+        groups = groups[:12]
+    uid = str(body.user_id).strip()
+    max_members = max(100, min(int(body.max_members or 3000), 30000))
+
+    sem = asyncio.Semaphore(3)          # 并发别太高，豆瓣会限流
+
+    async def one(gid: str) -> dict:
+        async with sem:
+            r = await _c().check_uid_in_group(gid, uid, max_members)
+            name = ""
+            try:
+                g = await _c().get_group(gid)
+                name = g.get("name", "")
+            except DoubanError:
+                pass
+            r["group_id"] = gid
+            r["group_name"] = name
+            return r
+
+    try:
+        results = await asyncio.gather(*[one(g) for g in groups])
+    except DoubanError as e:
+        raise _err(e)
+
+    def verdict(r: dict) -> str:
+        if r["in_group"]:
+            return "in"
+        return "out" if r["certain"] else "unknown"
+
+    for r in results:
+        r["verdict"] = verdict(r)
+
+    found = [r for r in results if r["verdict"] == "in"]
+    ruled_out = [r for r in results if r["verdict"] == "out"]
+    unknown = [r for r in results if r["verdict"] == "unknown"]
+
+    tips = []
+    if found:
+        tips.append(f"✅ 在 {len(found)} 个小组的成员名单里找到了 TA"
+                    + ("：" + "、".join(r["group_name"] or r["group_id"] for r in found)))
+    if ruled_out:
+        tips.append(f"❌ {len(ruled_out)} 个小组已全量翻完，确定 TA 不在其中")
+    if unknown:
+        low = min(r["coverage_pct"] for r in unknown)
+        tips.append(f"⚠️ {len(unknown)} 个小组没翻完（最低覆盖率 {low}%），"
+                    "没找到不等于不在——把这些小组的扫描深度调大再试")
+    return Resp(ok=True, source="douban",
+                data={"results": results, "found_count": len(found),
+                      "ruled_out_count": len(ruled_out), "unknown_count": len(unknown),
+                      "max_members": max_members},
+                message="；".join(tips) or "全部小组都已核对完毕。")
 
 
 @app.get("/api/user/{user_id}/topics", response_model=Resp)

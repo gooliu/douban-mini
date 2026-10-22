@@ -14,13 +14,27 @@
     GET /api/v2/group/:gid/members            小组成员列表（不支持按 uid 过滤，大组百万级）
     GET /api/v2/search/group?q=               按关键词搜索小组 ← 用于找小组 id
 
+    GET /api/v2/search/group?q=               按关键词搜索小组 ← 用于找小组 id
+
+网页版公开页（***重要***，2026-10-22 实测新发现）:
+    GET https://www.douban.com/group/people/:uid/joins   **他人加入的小组列表**
+        —— 匿名可读、不用签名、不用登录，一次性返回全部小组（实测 163 组一次到位）。
+        该用户把小组设为隐私时会返回 404「页面不存在」（此时 group/people/:uid/ 仍是 200，
+        用这个差异来区分「用户不存在」和「隐藏了小组」）。
+        前提：部署机器能直连 www.douban.com（海外节点需确认未被拦）。
+
 需登录接口（Bearer token，实测 2026-10）:
     GET /api/v2/group/user/:uid/joined_groups 用户加入的小组  ← 仅允许 :uid == token 本人
     GET /api/v2/group/user/posted_topics      本人发表的话题（支持 start/count 翻页）
 
 实测结论（重要）:
-    * joined_groups 对非本人 uid 一律返回 403 need_permission
-      —— 他人「加入的小组」无任何可用接口（frodo / rexxar / 网页版 全部堵死）
+    * App 侧 joined_groups 对非本人 uid 一律返回 403 need_permission，
+      但**桌面版公开页 joins 能拿到全量列表** —— 他人「加入的小组」不再是死路。
+      未见此前的结论为何相反：当时只测了 frodo / rexxar / m 站，漏了 www 桌面版。
+    * 该公开页也会被隐私设置挡住：用户设为隐私 → joins 返回 404。
+      这种情况只能退回到「逐个核对」：给定候选小组，翻 members 名单比对 uid。
+    * 成员名单每页最多 100 条、可深翻到 start=300000，因此几千人的小群能 100% 全量比对，
+      给出「确定不在组内」的硬结论；大组只能给覆盖率，没找到 ≠ 不在。
     * 他人「发言记录」可反查：给定候选小组 id，遍历 group/:gid/topics 按 author.id 过滤
     * /api/v2/user/me 返回的是豆瓣占位账号（id=1048835, uid="me"），**不可用于识别本人**
     * 真实本人 uid 通过 posted_topics 首条话题的作者 id 推断
@@ -37,6 +51,8 @@ import time
 import urllib.parse
 from dataclasses import dataclass, field
 from typing import Any
+
+import re
 
 import httpx
 
@@ -687,10 +703,157 @@ class DoubanClient:
         """小组成员列表（公开接口）
 
         注意：不支持按 uid/q 过滤，参数会被服务端忽略；
-        大组成员总量可达百万，无法用于精确判断某用户是否为成员。
+        但实测 **支持深翻页**（start 到 30 万仍返回数据）且每页最多 100 条，
+        因此小群（成员数几千以内）可全量遍历，用于「判断某 uid 是否在组内」。
         """
         return await self._request(f"/api/v2/group/{group_id}/members",
                                    {"start": start, "count": count})
+
+    # ---------------- 桌面网页通道（www.douban.com 抓公开页面） ----------------
+    # frodo/rexxar 拿不到「他人加入的小组」，但桌面版 https://www.douban.com/group/people/:uid/joins
+    # 是**匿名可读的公开页面**，且一次性给出全部小组（实测 163 组一次返回，无需翻页）。
+    # 唯一前提：目标用户没有把小组设为隐私（设了隐私则该页返回 404「页面不存在」）。
+    WWW_HOST = "https://www.douban.com"
+    WWW_UA = ("Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
+              "(KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36")
+
+    async def _get_www_page(self, path: str) -> tuple[int, str]:
+        """匿名抓取桌面版页面（不走代理、不走 frodo 通道）
+
+        返回 (status_code, html)。403/429 说明被反爬，调用方需要据此提示用户稍后重试。
+        """
+        http = httpx.AsyncClient(
+            timeout=15, trust_env=False, follow_redirects=True,
+            headers={"User-Agent": self.WWW_UA,
+                     "Accept-Language": "zh-CN,zh;q=0.9",
+                     "Accept": "text/html,application/xhtml+xml"},
+        )
+        try:
+            resp = await http.get(self.WWW_HOST + path)
+            return resp.status_code, resp.text
+        finally:
+            await http.aclose()
+
+    @staticmethod
+    def _strip_tags(s: str) -> str:
+        return re.sub(r"\s+", " ", re.sub(r"<[^>]+>", "", s or "")).strip()
+
+    async def fetch_joined_groups_www(self, user_id: str) -> dict:
+        """抓取「他人加入的小组」桌面版公开列表
+
+        返回:
+            {
+              "status": "ok" | "hidden" | "missing" | "blocked",
+              "groups": [{"id","name","member_count","section"}],
+              "managed": [同上, 该用户创建/管理的小组],
+              "page_declared": 页面上标注的总数（可能为 None）
+            }
+
+        status 说明:
+            ok      —— 拿到了列表（匿名可读）
+            hidden  —— 该用户把小组设为隐私 / 页面 404，但用户本身存在
+            missing —— 用户不存在
+            blocked —— 被豆瓣反爬（403/429），需稍后重试
+        """
+        uid = str(user_id).strip()
+        status, html = await self._get_www_page(f"/group/people/{uid}/joins")
+
+        if status in (403, 429):
+            return {"status": "blocked", "groups": [], "managed": [],
+                    "page_declared": None}
+        if status != 200:
+            # 区分「用户不存在」和「隐藏了小组」：小组主页仍可访问 = 用户存在，只是小组不可见
+            st2, _ = await self._get_www_page(f"/group/people/{uid}/")
+            return {"status": "hidden" if st2 == 200 else "missing",
+                    "groups": [], "managed": [], "page_declared": None}
+
+        # 页面分成若干 <div class="mod"> 区块，每块一个 <h2> 标题
+        # （实测有「管理的小组」「加入的小组」两块，按 h2 区分）
+        joined: list[dict] = []
+        managed: list[dict] = []
+        page_declared = None
+        declared_m = re.search(r'加入的小组\s*<a[^>]*>\s*(\d+)\s*</a>', html)
+        if declared_m:
+            page_declared = int(declared_m.group(1))
+
+        body_start = html.find('<div class="profile-nav">')
+        body = html[body_start:] if body_start > 0 else html
+        for mod in re.split(r'<div class="mod', body)[1:]:
+            h2 = re.search(r'<h2>(.*?)</h2>', mod, re.S)
+            section = self._strip_tags(h2.group(1)) if h2 else "加入的小组"
+            bucket = managed if "管理" in section else joined
+            for li in re.findall(r"<li\b.*?</li>", mod, re.S):
+                g = re.search(r'douban\.com/group/(\d+)/', li)
+                if not g:
+                    continue
+                name = re.search(r'<a[^>]*title="([^"]*)"', li)
+                if not name:
+                    name = re.search(r'<a[^>]*>\s*([^<]+?)\s*</a>', li)
+                num = re.search(r'class="num"[^>]*>\s*\(?([\d,]+)', li)
+                item = {
+                    "id": g.group(1),
+                    "name": self._strip_tags(name.group(1)) if name else "",
+                    "member_count": (int(num.group(1).replace(",", ""))
+                                     if num else None),
+                    "section": section,
+                }
+                bucket.append(item)
+
+        # 去重保序
+        def _uniq(xs):
+            seen, out = set(), []
+            for x in xs:
+                if x["id"] not in seen:
+                    seen.add(x["id"])
+                    out.append(x)
+            return out
+
+        return {"status": "ok", "groups": _uniq(joined), "managed": _uniq(managed),
+                "page_declared": page_declared}
+
+    async def check_uid_in_group(self, group_id: str, user_id: str,
+                                 max_members: int = 3000,
+                                 page_size: int = 100) -> dict:
+        """【隐藏小组排查】翻指定小组的成员名单，判断某 uid 是否在组内
+
+        命中 → 100% 确定在组内；没命中时分两种:
+          * 成员数 <= 已扫描数 → **确定不在组内**（全量比对过了）
+          * 成员数 >  已扫描数 → 不确定，给出覆盖率百分比（大组常达百万，覆盖率极低）
+
+        返回 {"in_group","certain","scanned","total","coverage_pct","pages","hit_at"}
+        """
+        gid, uid = str(group_id).strip(), str(user_id).strip()
+        total, scanned, start, pages, hit_at = 0, 0, 0, 0, None
+        while scanned < max_members:
+            try:
+                d = await self.get_group_members(gid, start, page_size)
+            except DoubanError as e:
+                return {"in_group": False, "certain": False, "scanned": scanned,
+                        "total": total, "coverage_pct": round(scanned / total * 100, 2)
+                        if total else 0.0, "pages": pages, "hit_at": None,
+                        "error": f"{e.code}: {e.msg[:80]}", "gid": gid}
+            members = d.get("members") or []
+            if not total:
+                total = int(d.get("total") or 0)
+            pages += 1
+            for i, m in enumerate(members):
+                if str(m.get("id")) == uid or str(m.get("uid")) == uid:
+                    hit_at = start + i
+                    break
+            if hit_at is not None:
+                return {"in_group": True, "certain": True, "scanned": scanned + len(members),
+                        "total": total or (scanned + len(members)),
+                        "coverage_pct": 100.0, "pages": pages, "hit_at": hit_at, "gid": gid}
+            scanned += len(members)
+            if len(members) < page_size:      # 已到末页
+                break
+            start += page_size
+            await asyncio.sleep(0.12)         # 限速，避免触发反爬
+
+        covered_all = bool(total) and total <= scanned
+        return {"in_group": False, "certain": covered_all, "scanned": scanned,
+                "total": total, "coverage_pct": round(scanned / total * 100, 2)
+                if total else 0.0, "pages": pages, "hit_at": None, "gid": gid}
 
     async def search_groups(self, q: str, start: int = 0, count: int = 20) -> dict:
         """按关键词搜索小组（公开接口），用于找到小组 id

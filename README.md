@@ -217,32 +217,36 @@ Render 免费层 15 分钟无访问会休眠，第一次打开要等 30 秒左�
 > 旧地址落到别的设备上直接返回 502。填云端平台给的 `https://xxx.onrender.com`
 > 这类固定域名才靠谱。
 
-#### 方式一：Render（免费、不用信用卡，最简单）
+#### 方式一：Zeabur（免信用卡、中文界面、国内访问快，首选）
 
-1. 打开 <https://render.com> → 用 **GitHub 账号**注册登录（Sign in with GitHub）
-2. 右上角 `New +` → **Blueprint**（蓝图）
-3. 选择 `gooliu/douban-mini` 仓库 → 它会读仓库里的 `render.yaml`，直接 `Apply`
-4. 等 3~8 分钟构建完，服务详情页顶部会出现地址，形如
-   **`https://douban-mini-xxxx.onrender.com`**
-5. 把这个地址填进 `web/index.html` 的 `DEFAULT_CLOUD_API`（第 918 行附近）：
+1. 打开 <https://zeabur.com> → **用 GitHub 账号登录**
+2. 新建一个项目（区域选 **香港 / 东京**，离国内最近）
+3. 项目里 `Add Service` → **Git** → 授权 GitHub → 选 `gooliu/douban-mini`
+4. 它会读到仓库根目录的 `Dockerfile` 自动构建。
+   如果它把项目识别成了别的类型，就在服务设置里把构建方式手动改成 **Dockerfile**
+5. 部署完成后，服务详情页会给出一个域名，形如
+   **`https://douban-mini.zeabur.app`**（也可在服务 → Domain 里改成别的）
+6. 把这个地址发出来（或自己填进 `web/index.html` 的 `DEFAULT_CLOUD_API`），推送后 Pages 自动更新；
+   也可以直接在页面的「设置后端地址」框里填一次（会记住，但只对这台浏览器生效）
 
-   ```js
-   const DEFAULT_CLOUD_API = 'https://douban-mini-xxxx.onrender.com';
-   ```
+> Zeabur Free Plan **不需要信用卡**，注册即可部署；免费版空闲会休眠，
+> 冷启动只有几秒（比 Render 的 30~60 秒好很多）。
 
-   然后 `git push`，GitHub Pages 会自动更新。
-   也可以不推送，直接在页面的「设置后端地址」框里填一次（会记住，但只对这台浏览器生效）。
+#### 方式二：Render（老牌，但可能要预授权）
 
-Render 免费套餐的两个坑（已知，不是故障）：
+1. 打开 <https://render.com> → **Sign in with GitHub**
+2. 右上角 `New +` → **Blueprint** → 选 `gooliu/douban-mini` → `Apply`
+3. 构建 3~8 分钟后拿到 `https://douban-mini-xxxx.onrender.com`
 
-| 现象 | 原因 | 说明 |
-| --- | --- | --- |
-| 首次打开要等 30~60 秒 | 15 分钟无人访问会休眠 | 页面已显示「⏳ 后端正在启动」提示，等一下即可 |
-| 重新部署后补充记录没了 | 免费套餐没有持久磁盘 | 重要的补充记录请在页面里导出备份 |
+> ⚠️ **实测（2026-10）**：Render 免费 Web 服务对部分新账号会在建服务时弹
+> **「Add card」**，要求绑卡做 **1 美元预授权（验证用，不实际扣费）**。
+> 不想绑卡就改用上面的 Zeabur。
+> Render 免费层的两个已知坑：15 分钟无访问休眠（唤醒 30~60 秒，页面会提示
+> 「⏳ 后端正在启动」）；没有持久磁盘，重新部署后补充记录会丢。
 
-#### 方式二：其它平台
+#### 方式三：其它平台
 
-`Dockerfile` 是通用的，Koyeb / Northflank / Railway / Fly.io / Zeabur / 自建服务器都能直接用：
+`Dockerfile` 是通用的，Koyeb / Northflank / Railway / Fly.io / 自建服务器都能直接用：
 
 ```bash
 docker build -t douban-mini .
@@ -250,8 +254,9 @@ docker run -d -p 8000:8000 -e DOUBAN_CLOUD=1 \
   -v douban-data:/data douban-mini      # 挂卷才能保住补充记录
 ```
 
-免费额度参考（2026-10）：Koyeb / Northflank 的免费实例**不休眠**，但要绑信用卡，
-且区域只有法兰克福 / 华盛顿；Render 免费层在新加坡、离国内更近，代价是会休眠。
+免费额度参考（2026-10）：**Northflank** 免费层常驻不休眠、不用信用卡；
+**Koyeb** 多数账号免卡，但区域只有法兰克福 / 华盛顿；**Railway** 已无永久免费档；
+**Fly.io** 新用户必须绑卡。
 
 > ⚠️ 豆瓣对境外 IP 风控更严。如果部署后经常出现「机器人程序」提示，
 > 建议改用自己的云服务器（国内 IP）。

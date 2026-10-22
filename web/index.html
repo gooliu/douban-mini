@@ -1180,11 +1180,15 @@ function banner(res) {
       esc(res.message || '当前为演示数据，配置 DOUBAN_TOKEN 后为真实数据') + '</span></div>';
   }
   if (res.source === 'restricted') {
+    const rd = res.data || {};
+    let title = '豆瓣接口限制';
+    if (rd.login_required) title = 'TA 的小组只对登录用户可见';
+    else if (rd.hidden_only) title = 'TA 的小组仅自己可见';
     let m = esc(res.message || '该数据无公开接口');
     if (/登录|token/i.test(res.message || '')) {
       m += ' <span class="relink" onclick="openTokenModal()">点此更新登录</span>';
     }
-    return '<div class="info-banner"><div class="ib-title">豆瓣接口限制</div>' + m + '</div>';
+    return '<div class="info-banner"><div class="ib-title">' + title + '</div>' + m + '</div>';
   }
   return '';
 }
@@ -2098,6 +2102,7 @@ async function renderGroups() {
     ${banner(res)}`;
 
   const priv = !!d.privacy_hidden;
+  const needLogin = !!d.login_required;
   const claimed = d.claimed_total || 0;
   if (chkState.uid !== String(currentUser.id)) {     // 换个人就清掉上一轮的候选小组
     chkState = { groups: [], busy: false, uid: String(currentUser.id) };
@@ -2108,9 +2113,11 @@ async function renderGroups() {
     html += `<div class="list-header">加入的小组（${esc(d.total || groups.length)}）</div>`;
     if (claimed && claimed > groups.length) {
       html += `<div class="info-banner" style="background:#fff4e6">
-        <div class="ib-title">有 ${claimed - groups.length} 个小组被折叠了</div>
-        TA 的主页显示加入了 ${esc(claimed)} 个小组，页面上只列出 ${groups.length} 个
-        —— 豆瓣会按隐私/热度折叠一部分。想知道 TA 在不在某个具体小组，用下面的排查。</div>`;
+        <div class="ib-title">${d.partial ? '完整名单拉不到' : '有 ' + (claimed - groups.length) + ' 个小组没列出'}</div>
+        ${d.partial
+          ? `TA 的主页显示加入了 ${esc(claimed)} 个小组，这个页面只公开列出前 ${groups.length} 个 —— 完整的要登录才给。想知道 TA 在不在某个具体小组，用下面的排查。`
+          : `TA 的主页显示加入了 ${esc(claimed)} 个小组，页面上只列出 ${groups.length} 个 —— 豆瓣会按隐私/热度折叠一部分。想知道 TA 在不在某个具体小组，用下面的排查。`}
+      </div>`;
     }
     html += groups.map(g => `
       <div class="group-item" onclick="renderGroupTopics('${esc(g.id)}', '${esc(g.name)}')">
@@ -2130,9 +2137,11 @@ async function renderGroups() {
   } else if (!isSelf) {
     html += `<div class="list-header">加入的小组${claimed ? '（TA 主页显示 ' + esc(claimed) + ' 个）' : ''}</div>`;
     html += `<div class="chk-desc" style="padding:0 2px 4px">
-      ${priv
-        ? '列表被隐私挡住，取不到具体是哪些组 —— 用下面的「逐个核对」确认 TA 在不在指定小组。'
-        : '暂时没有拿到 TA 的小组列表 —— 用下面的「逐个核对」确认 TA 在不在指定小组。'}
+      ${needLogin
+        ? '列表只对「登录用户」开放，匿名抓不到具体是哪些组 —— 把你的豆瓣 Cookie 粘到登录里再查可能就能读到；读不到就用下面的「逐个核对」确认 TA 在不在指定小组。'
+        : (priv
+          ? '列表设成了仅自己可见，登录了也取不到 —— 用下面的「逐个核对」确认 TA 在不在指定小组。'
+          : '暂时没有拿到 TA 的小组列表 —— 用下面的「逐个核对」确认 TA 在不在指定小组。')}
     </div>`;
   } else {
     html += '<div class="empty">没有找到加入的小组</div>';

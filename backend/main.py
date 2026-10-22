@@ -736,13 +736,17 @@ async def get_user_groups(user_id: str, start: int = 0, count: int = Query(50, l
         note = ""
         if claimed and len(groups) < claimed:
             note = f"（主页显示 {claimed} 个，这里列出 {len(groups)} 个，其余被豆瓣按隐私折叠）"
+        if www.get("partial"):
+            note = (f"（页面只列出前 {len(groups)} 个，主页显示 {claimed or '更多'} 个；"
+                    f"完整名单拉不到，可用下面的「隐藏小组排查」逐个核对）")
         return Resp(
             ok=True, source="douban",
             data={"total": len(groups), "groups": groups,
                   "claimed_total": claimed,
                   "managed_count": len(www["managed"]),
+                  "partial": bool(www.get("partial")),
                   "hidden": claimed and len(groups) < claimed},
-            message=f"来自豆瓣桌面版公开页（匿名可读）{note}")
+            message=f"来自豆瓣桌面版页面{note}")
 
     if www.get("status") == "blocked":
         return Resp(ok=True, source="restricted", data={"total": 0, "groups": []},
@@ -754,14 +758,31 @@ async def get_user_groups(user_id: str, start: int = 0, count: int = Query(50, l
                     message=f"豆瓣上没有 uid 为 {user_id} 的用户（页面返回「页面不存在」）。"
                             "确认一下 uid 有没有输错。")
 
-    # hidden：该用户把小组设为隐私 —— 这正是需要「逐个排查」的场景
+    if www.get("status") == "login_required":
+        claimed = 0
+        try:
+            claimed = (await _c().get_user(str(user_id))).get("joined_group_count", 0)
+        except DoubanError:
+            pass
+        tip = ("你粘贴的 Cookie 在豆瓣网页端没被认（可能是 App 端的登录态，或已过期）——"
+               "重新从浏览器 F12 复制一份完整 Cookie 再试。"
+               if www.get("with_cookie")
+               else "点右上角「登录」把你的豆瓣 Cookie 粘进来，再查一次就可能读到。")
+        return Resp(
+            ok=True, source="restricted",
+            data={"total": 0, "groups": [], "login_required": True,
+                  "claimed_total": claimed},
+            message=f"TA 把小组可见范围设成了「仅登录用户」—— 你在浏览器里登录豆瓣能看到，"
+                    f"匿名请求只会拿到「未登录无法查看更多内容」。{tip}"
+                    f"拿不到就用下面的「隐藏小组排查」逐个核对。")
+
+    # hidden：连登录提示都没有，整个页面 404 —— 仅自己可见
     return Resp(
         ok=True, source="restricted",
-        data={"total": 0, "groups": [], "privacy_hidden": True},
-        message="TA 把小组设成了隐私 —— 豆瓣会直接把这个页面变成「页面不存在」，"
-                "任何人（含 App 接口）都拉不到完整列表。"
-                "想知道 TA 在不在某个具体小组，用下面的「隐藏小组排查」："
-                "给出候选小组，我逐个翻成员名单核对。")
+        data={"total": 0, "groups": [], "privacy_hidden": True, "hidden_only": True},
+        message="TA 的小组设成了「仅自己可见」—— 豆瓣直接把这个页面变成「页面不存在」，"
+                "登录了也看不到。想知道 TA 在不在某个具体小组，"
+                "用下面的「隐藏小组排查」：给出候选小组，我逐个翻成员名单核对。")
 
 
 @app.get("/api/user/{user_id}/joined-groups", response_model=Resp)
@@ -780,23 +801,32 @@ async def get_user_joined_groups(user_id: str):
 
     if www["status"] != "ok":
         msg = {
-            "hidden": "TA 把小组设成了隐私，豆瓣把列表页变成了「页面不存在」，"
-                      "匿名和 App 接口都拿不到。请改用「隐藏小组排查」逐个核对。",
+            "login_required": "TA 把小组可见范围设成了「仅登录用户」—— 浏览器里登录豆瓣能看到，"
+                              "匿名请求只能拿到「未登录无法查看更多内容」。"
+                              "把豆瓣 Cookie 粘进来再查可能读到；否则用「隐藏小组排查」逐个核对。",
+            "hidden": "TA 的小组设成了「仅自己可见」，豆瓣把列表页变成「页面不存在」，"
+                      "登录了也看不到。请改用「隐藏小组排查」逐个核对。",
             "missing": f"豆瓣上没有 uid 为 {user_id} 的用户。",
             "blocked": "豆瓣网页暂时拒绝了请求（反爬），稍等一两分钟再试。",
         }.get(www["status"], "未能获取该用户的小组列表。")
         return Resp(ok=True, source="restricted",
                     data={"status": www["status"], "groups": [], "managed": [],
-                          "claimed_total": claimed}, message=msg)
+                          "claimed_total": claimed,
+                          "login_required": www["status"] == "login_required",
+                          "with_cookie": www.get("with_cookie"),
+                          "cookie_accepted": www.get("cookie_accepted")},
+                    message=msg)
 
     return Resp(ok=True, source="douban",
                 data={"status": "ok",
                       "groups": www["groups"],
                       "managed": www["managed"],
                       "claimed_total": claimed,
+                      "partial": bool(www.get("partial")),
                       "listed_total": len(www["groups"]) + len(www["managed"]),
-                      "complete": claimed == 0 or
-                                  claimed == len(www["groups"]) + len(www["managed"])})
+                      "complete": (not www.get("partial")) and
+                                  (claimed == 0 or
+                                   claimed == len(www["groups"]) + len(www["managed"]))})
 
 
 class MembershipIn(BaseModel):

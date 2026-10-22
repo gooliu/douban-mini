@@ -711,23 +711,34 @@ class DoubanClient:
 
     # ---------------- 桌面网页通道（www.douban.com 抓公开页面） ----------------
     # frodo/rexxar 拿不到「他人加入的小组」，但桌面版 https://www.douban.com/group/people/:uid/joins
-    # 是**匿名可读的公开页面**，且一次性给出全部小组（实测 163 组一次返回，无需翻页）。
-    # 唯一前提：目标用户没有把小组设为隐私（设了隐私则该页返回 404「页面不存在」）。
+    # 一次给出全部小组（实测 163 组一次返回，无需翻页）。它有三种结局：
+    #   1) 200 有列表      → 该用户的小组对所有人可见（匿名可读）
+    #   2) 404 + 同级页 403「未登录无法查看更多内容」
+    #                      → 该用户把可见范围设成了「仅登录用户」（**不是隐私**）
+    #                        访客自己的 Cookie 有效时能读到，匿名叫不到
+    #   3) 404 + 同级页也 404 → 仅自己可见 / 已关闭
     WWW_HOST = "https://www.douban.com"
     WWW_UA = ("Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
               "(KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36")
+    NEED_LOGIN_HINT = "未登录无法查看更多内容"
 
-    async def _get_www_page(self, path: str) -> tuple[int, str]:
-        """匿名抓取桌面版页面（不走代理、不走 frodo 通道）
+    async def _get_www_page(self, path: str, cookie=None,
+                            referer: str = "") -> tuple[int, str]:
+        """抓取桌面版页面（不走代理、不走 frodo 通道）
 
-        返回 (status_code, html)。403/429 说明被反爬，调用方需要据此提示用户稍后重试。
+        cookie 不传则用当前访客的登录态（self.cookie）。有些用户的小组只对
+        登录用户可见，带上有效 Cookie 才读得到。
+        返回 (status_code, html)。403/429 说明被反爬，调用方需提示稍后重试。
         """
-        http = httpx.AsyncClient(
-            timeout=15, trust_env=False, follow_redirects=True,
-            headers={"User-Agent": self.WWW_UA,
-                     "Accept-Language": "zh-CN,zh;q=0.9",
-                     "Accept": "text/html,application/xhtml+xml"},
-        )
+        ck = ((self.cookie if cookie is None else cookie) or "").strip()
+        headers = {"User-Agent": self.WWW_UA,
+                   "Accept-Language": "zh-CN,zh;q=0.9",
+                   "Accept": "text/html,application/xhtml+xml",
+                   "Referer": referer or (self.WWW_HOST + "/")}
+        if ck:
+            headers["Cookie"] = ck
+        http = httpx.AsyncClient(timeout=15, trust_env=False,
+                                 follow_redirects=True, headers=headers)
         try:
             resp = await http.get(self.WWW_HOST + path)
             return resp.status_code, resp.text
@@ -735,52 +746,33 @@ class DoubanClient:
             await http.aclose()
 
     @staticmethod
+    def _looks_logged_in(html: str) -> bool:
+        """桌面版页面里还能看到「登录/注册」= 这份 Cookie 在 www 站点没被认。"""
+        return "登录/注册" not in (html or "")
+
+    @staticmethod
     def _strip_tags(s: str) -> str:
         return re.sub(r"\s+", " ", re.sub(r"<[^>]+>", "", s or "")).strip()
 
-    async def fetch_joined_groups_www(self, user_id: str) -> dict:
-        """抓取「他人加入的小组」桌面版公开列表
+    def _parse_www_groups(self, html: str) -> dict:
+        """解析「加入的小组 / 管理的小组」列表页
 
-        返回:
-            {
-              "status": "ok" | "hidden" | "missing" | "blocked",
-              "groups": [{"id","name","member_count","section"}],
-              "managed": [同上, 该用户创建/管理的小组],
-              "page_declared": 页面上标注的总数（可能为 None）
-            }
-
-        status 说明:
-            ok      —— 拿到了列表（匿名可读）
-            hidden  —— 该用户把小组设为隐私 / 页面 404，但用户本身存在
-            missing —— 用户不存在
-            blocked —— 被豆瓣反爬（403/429），需稍后重试
+        joins 页（完整列表）与 people/:uid/groups 页（只列前 9 个）结构一致：
+            <div class="mod"><h2>加入的小组 (21)</h2><ul><li>…小组卡片…</li></ul></div>
         """
-        uid = str(user_id).strip()
-        status, html = await self._get_www_page(f"/group/people/{uid}/joins")
-
-        if status in (403, 429):
-            return {"status": "blocked", "groups": [], "managed": [],
-                    "page_declared": None}
-        if status != 200:
-            # 区分「用户不存在」和「隐藏了小组」：小组主页仍可访问 = 用户存在，只是小组不可见
-            st2, _ = await self._get_www_page(f"/group/people/{uid}/")
-            return {"status": "hidden" if st2 == 200 else "missing",
-                    "groups": [], "managed": [], "page_declared": None}
-
-        # 页面分成若干 <div class="mod"> 区块，每块一个 <h2> 标题
-        # （实测有「管理的小组」「加入的小组」两块，按 h2 区分）
         joined: list[dict] = []
         managed: list[dict] = []
         page_declared = None
-        declared_m = re.search(r'加入的小组\s*<a[^>]*>\s*(\d+)\s*</a>', html)
-        if declared_m:
-            page_declared = int(declared_m.group(1))
 
         body_start = html.find('<div class="profile-nav">')
         body = html[body_start:] if body_start > 0 else html
         for mod in re.split(r'<div class="mod', body)[1:]:
             h2 = re.search(r'<h2>(.*?)</h2>', mod, re.S)
             section = self._strip_tags(h2.group(1)) if h2 else "加入的小组"
+            if page_declared is None and "加入" in section:
+                m = re.search(r"(\d[\d,]*)", section)
+                if m:
+                    page_declared = int(m.group(1).replace(",", ""))
             bucket = managed if "管理" in section else joined
             for li in re.findall(r"<li\b.*?</li>", mod, re.S):
                 g = re.search(r'douban\.com/group/(\d+)/', li)
@@ -790,16 +782,14 @@ class DoubanClient:
                 if not name:
                     name = re.search(r'<a[^>]*>\s*([^<]+?)\s*</a>', li)
                 num = re.search(r'class="num"[^>]*>\s*\(?([\d,]+)', li)
-                item = {
+                bucket.append({
                     "id": g.group(1),
                     "name": self._strip_tags(name.group(1)) if name else "",
                     "member_count": (int(num.group(1).replace(",", ""))
                                      if num else None),
                     "section": section,
-                }
-                bucket.append(item)
+                })
 
-        # 去重保序
         def _uniq(xs):
             seen, out = set(), []
             for x in xs:
@@ -808,8 +798,64 @@ class DoubanClient:
                     out.append(x)
             return out
 
-        return {"status": "ok", "groups": _uniq(joined), "managed": _uniq(managed),
+        return {"groups": _uniq(joined), "managed": _uniq(managed),
                 "page_declared": page_declared}
+
+    async def fetch_joined_groups_www(self, user_id: str) -> dict:
+        """抓取「他人加入的小组」桌面版页面
+
+        返回:
+            {
+              "status": "ok" | "login_required" | "hidden" | "missing" | "blocked",
+              "groups": [{"id","name","member_count","section"}],
+              "managed": [同上, 该用户创建/管理的小组],
+              "page_declared": 页面上标注的总数（可能为 None）,
+              "partial": 是否只拿到前 9 个（来自 people/:uid/groups 预览页）,
+              "with_cookie": 本次请求是否带了访客登录态,
+              "cookie_accepted": 带的 Cookie 在 www 站点是否被认（None=没带）
+            }
+
+        status 说明:
+            ok             —— 拿到了列表
+            login_required —— 豆瓣明确返回「未登录无法查看更多内容」：
+                              TA 把小组可见范围设成了「仅登录用户」，
+                              带访客自己的有效 Cookie 重试可能能读到（**不是隐私**）
+            hidden         —— 连登录提示都没有，页面整个 404（仅自己可见/已关闭）
+            missing        —— 用户不存在
+            blocked        —— 被豆瓣反爬（403/429），需稍后重试
+        """
+        uid = str(user_id).strip()
+        has_ck = bool((self.cookie or "").strip())
+        base = {"groups": [], "managed": [], "page_declared": None,
+                "with_cookie": has_ck, "cookie_accepted": None}
+
+        status, html = await self._get_www_page(f"/group/people/{uid}/joins")
+        if status == 200:
+            parsed = self._parse_www_groups(html)
+            if parsed["groups"] or parsed["managed"]:
+                return {**base, **parsed, "status": "ok",
+                        "cookie_accepted": self._looks_logged_in(html)}
+
+        # joins 打不开：再看 people/:uid/groups —— 它的 403 正文会明说「未登录无法查看更多内容」
+        st2, html2 = await self._get_www_page(f"/people/{uid}/groups")
+        if st2 == 200:
+            parsed = self._parse_www_groups(html2)
+            if parsed["groups"] or parsed["managed"]:
+                return {**base, **parsed, "status": "ok", "partial": True,
+                        "cookie_accepted": self._looks_logged_in(html2)}
+
+        if (self.NEED_LOGIN_HINT in (html or "")
+                or self.NEED_LOGIN_HINT in (html2 or "")):
+            return {**base, "status": "login_required",
+                    "cookie_accepted": False if has_ck else None}
+
+        if status in (403, 429) or st2 in (403, 429):
+            return {**base, "status": "blocked",
+                    "cookie_accepted": False if has_ck else None}
+
+        # 连登录提示都没有：看用户本身还在不在
+        st3, _ = await self._get_www_page(f"/group/people/{uid}/")
+        return {**base, "status": "hidden" if st3 == 200 else "missing"}
 
     async def check_uid_in_group(self, group_id: str, user_id: str,
                                  max_members: int = 3000,

@@ -7,6 +7,10 @@ import sys
 BASE = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 HTML = os.path.join(BASE, "web", "index.html")
 html = open(HTML, encoding="utf-8").read()
+BACKEND = "\n".join(
+    open(os.path.join(BASE, "backend", f), encoding="utf-8").read()
+    for f in ("main.py", "douban_client.py")
+)
 
 script = "\n".join(re.findall(r"<script(?![^>]*src=)[^>]*>(.*?)</script>", html, re.S))
 static_html = re.sub(r"<script.*?</script>", "", html, flags=re.S)
@@ -59,6 +63,10 @@ checks = [
     ("反查发言始终保留（非本人）", "if (!isSelf) html += lookupPanelHtml();" in script),
     ("加入的小组自然列出", "加入的小组（${esc(d.total || groups.length)}）" in script),
     ("列表页挂排查入口", "toggleChkPanel()" in script),
+    ("区分「仅登录可见」", "const needLogin = !!d.login_required;" in script),
+    ("banner 标题区分登录门槛", "TA 的小组只对登录用户可见" in script),
+    ("后端有 login_required 判定", "login_required" in BACKEND),
+    ("后端网页通道带访客 Cookie", 'headers["Cookie"] = ck' in BACKEND),
 ]
 bad = [n for n, ok in checks if not ok]
 for n, ok in checks:

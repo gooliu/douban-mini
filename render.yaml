@@ -1,4 +1,5 @@
 # Render Blueprint：push 到 GitHub 后在 Render 里 "New > Blueprint" 选本仓库即可一键部署
+# 免费套餐注意：15 分钟无访问会休眠，下次打开要等约 30~60 秒唤醒（页面会提示"正在唤醒"）
 services:
   - type: web
     name: douban-mini
@@ -10,6 +11,8 @@ services:
     envVars:
       - key: DOUBAN_CLOUD
         value: "1"             # 云端模式：登录凭证只存访问者浏览器，不落服务端
+      - key: DOUBAN_DATA_DIR
+        value: "/data"         # 补充记录目录；免费套餐无持久卷，重新部署会清空
       - key: DOUBAN_CACHE_TTL
         value: "300"
       - key: DOUBAN_SELF_UID

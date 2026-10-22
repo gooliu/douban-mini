@@ -77,7 +77,9 @@ AUTH_TOKEN_URL_WWW = "https://www.douban.com/service/auth2/token"
 #   （公开抓包示例：frodo.douban.com/api/v2/group/xxx/topics?...&udid=5e4159565b89f86cccda）
 #   douban_udid 是 40 位十六进制。udid 需**稳定不变**（每次都换会被当成新设备）。
 #   注：早年豆瓣 FM 用的是 40 位，frodo 是 20 位；长度不合规会被判 invalid_device_id。
-DEVICE_FILE = os.path.join(os.path.dirname(os.path.abspath(__file__)), "data", "device.json")
+_DATA_DIR = os.getenv("DOUBAN_DATA_DIR", "").strip() or os.path.join(
+    os.path.dirname(os.path.abspath(__file__)), "data")
+DEVICE_FILE = os.path.join(_DATA_DIR, "device.json")
 DEVICE_UDID = os.getenv("DOUBAN_DEVICE_ID", "").strip()   # 可用环境变量固定设备号
 
 

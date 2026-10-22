@@ -206,14 +206,52 @@ Render 免费层 15 分钟无访问会休眠，第一次打开要等 30 秒左�
 
 本机使用（不设该变量）仍是老行为：凭证写进 `backend/douban_config.json`。
 
-### 其它平台
+### 云端部署：让网址 24/7 可用（推荐）
 
-`Dockerfile` 是通用的，Railway / Koyeb / Fly.io / 自建服务器都能直接用：
+**为什么必须做**：GitHub Pages 只托管网页（静态文件），**后端仍然跑在这台电脑上**。
+你关机 / 断网，别人打开网址就是「能看不能用」——页面正常，但查不了任何东西。
+把后端部署到云平台后，网址与本机彻底解耦，开关机都不影响。
+
+> ⚠️ **别再写家宽公网 IP**。页面里曾经写死过 `http://211.91.184.194:8000`，
+> 但运营商分配的 IP 会变——实测这台机器当前的出口 IP 已经是 `141.11.146.78`，
+> 旧地址落到别的设备上直接返回 502。填云端平台给的 `https://xxx.onrender.com`
+> 这类固定域名才靠谱。
+
+#### 方式一：Render（免费、不用信用卡，最简单）
+
+1. 打开 <https://render.com> → 用 **GitHub 账号**注册登录（Sign in with GitHub）
+2. 右上角 `New +` → **Blueprint**（蓝图）
+3. 选择 `gooliu/douban-mini` 仓库 → 它会读仓库里的 `render.yaml`，直接 `Apply`
+4. 等 3~8 分钟构建完，服务详情页顶部会出现地址，形如
+   **`https://douban-mini-xxxx.onrender.com`**
+5. 把这个地址填进 `web/index.html` 的 `DEFAULT_CLOUD_API`（第 918 行附近）：
+
+   ```js
+   const DEFAULT_CLOUD_API = 'https://douban-mini-xxxx.onrender.com';
+   ```
+
+   然后 `git push`，GitHub Pages 会自动更新。
+   也可以不推送，直接在页面的「设置后端地址」框里填一次（会记住，但只对这台浏览器生效）。
+
+Render 免费套餐的两个坑（已知，不是故障）：
+
+| 现象 | 原因 | 说明 |
+| --- | --- | --- |
+| 首次打开要等 30~60 秒 | 15 分钟无人访问会休眠 | 页面已显示「⏳ 后端正在启动」提示，等一下即可 |
+| 重新部署后补充记录没了 | 免费套餐没有持久磁盘 | 重要的补充记录请在页面里导出备份 |
+
+#### 方式二：其它平台
+
+`Dockerfile` 是通用的，Koyeb / Northflank / Railway / Fly.io / Zeabur / 自建服务器都能直接用：
 
 ```bash
 docker build -t douban-mini .
-docker run -d -p 8000:8000 -e DOUBAN_CLOUD=1 douban-mini
+docker run -d -p 8000:8000 -e DOUBAN_CLOUD=1 \
+  -v douban-data:/data douban-mini      # 挂卷才能保住补充记录
 ```
+
+免费额度参考（2026-10）：Koyeb / Northflank 的免费实例**不休眠**，但要绑信用卡，
+且区域只有法兰克福 / 华盛顿；Render 免费层在新加坡、离国内更近，代价是会休眠。
 
 > ⚠️ 豆瓣对境外 IP 风控更严。如果部署后经常出现「机器人程序」提示，
 > 建议改用自己的云服务器（国内 IP）。
@@ -262,6 +300,8 @@ docker run -d -p 8000:8000 -e DOUBAN_CLOUD=1 douban-mini
 | `DOUBAN_CACHE_TTL` | 600 | 缓存秒数 |
 | `DOUBAN_SCAN_GROUPS` | 8 | 保留参数（扫描方案已因接口限制失效） |
 | `DOUBAN_DEVICE_ID` | 自动生成 | 账号密码登录用的设备号（20 位十六进制）；一般用不到，仅调试用 |
+| `DOUBAN_DATA_DIR` | `backend/data` | 补充记录 / 设备号的存放目录；云端部署指到挂载卷才能跨重启保留 |
+| `PORT` | 8000 | 监听端口；Render / Koyeb 等平台会自动注入，容器已兼容 |
 
 ## 技术要点：frodo 签名算法（已实测）
 
@@ -354,10 +394,11 @@ douban-mini/
 | 代码仓库 | https://github.com/gooliu/douban-mini |
 | 网页（GitHub Pages） | https://gooliu.github.io/douban-mini/ |
 
-网页由 `.github/workflows/pages.yml` 在每次推送 `main` 后自动部署。
-页面内置的后端地址是 `http://211.91.184.194:8000`（家宽公网 IP），
-**需要先在路由器做端口映射**，否则页面顶部会提示「未连接后端」，
-可临时在页面的地址框里手动填后端地址。
+网页由 `.github/workflows/pages.yml` 在每次推送 `main` 后自动部署，
+**网页本身永远在线**（存在 GitHub 服务器上，与本机开关机无关）。
+
+但后端地址目前**留空** —— 页面打开会提示「后端还没部署到云端」，
+需要在上面的「云端部署」里拿一个地址，填进 `DEFAULT_CLOUD_API` 或页面的地址框。
 
 ### 公网隧道（推荐：免注册、免账号、自带 HTTPS）
 

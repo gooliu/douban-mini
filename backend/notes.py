@@ -28,7 +28,9 @@ import time
 from pathlib import Path
 from typing import Any, Optional
 
-DATA_DIR = Path(__file__).parent / "data"
+# 数据目录：默认 backend/data；云端部署可用 DOUBAN_DATA_DIR 指到挂载的持久卷，
+# 否则容器重启（免费套餐休眠/重新部署）会清空补充记录。
+DATA_DIR = Path(os.getenv("DOUBAN_DATA_DIR", "").strip() or (Path(__file__).parent / "data"))
 NOTES_FILE = DATA_DIR / "notes.json"
 
 MAX_ITEMS_PER_USER = 200          # 单个 uid 最多保留多少条

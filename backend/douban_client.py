@@ -72,9 +72,28 @@ UA = ("api-client/1 com.douban.frodo/7.22.0 (233) Android/22 product/shamu "
 # 连续命中时长按 60s → 120s → 240s → 480s → 900s（封顶）
 COOLDOWN_STEPS = [60, 120, 240, 480, 900]
 
+def _www_host() -> str:
+    """桌面版站点根的取值顺序：
+    1. 环境变量 DOUBAN_WWW_HOST（docker run -e 注入）
+    2. 持久卷文件 /data/www_host.txt（服务器 IP 被豆瓣限流时，
+       写一个中转地址进去 + docker restart 即可切换，不用重建容器）
+    3. 默认豆瓣官网
+    """
+    env = os.getenv("DOUBAN_WWW_HOST", "").strip()
+    if env:
+        return env.rstrip("/")
+    try:
+        v = open("/data/www_host.txt", encoding="utf-8").read().strip()
+        if v:
+            return v.rstrip("/")
+    except OSError:
+        pass
+    return "https://www.douban.com"
+
+
 # 桌面版 www 页面（比 App 接口严格得多）：403/429 后先静默一段时间，
 # 期间不再发请求。实测阿里云机房出口被限流后，越重试恢复得越慢。
-WWW_COOLDOWN_SECS = int(os.getenv("DOUBAN_WWW_COOLDOWN", "600"))
+WWW_COOLDOWN_SECS = int(os.getenv("DOUBAN_WWW_COOLDOWN", "600") or 600)
 # 「他人加入的小组」结果缓存：同一 uid 在该 TTL 内重复查询直接返回上次结果，
 # 既省请求也避免用户连点把 IP 点进黑名单（列表变化本来就慢，15 分钟足够）
 WWW_CACHE_TTL = int(os.getenv("DOUBAN_WWW_CACHE_TTL", "900"))
@@ -727,9 +746,9 @@ class DoubanClient:
     #                      → 该用户把可见范围设成了「仅登录用户」（**不是隐私**）
     #                        访客自己的 Cookie 有效时能读到，匿名叫不到
     #   3) 404 + 同级页也 404 → 仅自己可见 / 已关闭
-    # 桌面版站点根。默认豆瓣官网；被机房 IP 限流时可指向自建反代，
-    # 不用改代码，只要给容器加环境变量 DOUBAN_WWW_HOST=https://your-proxy
-    WWW_HOST = (os.getenv("DOUBAN_WWW_HOST") or "https://www.douban.com").rstrip("/")
+    # 桌面版站点根。默认豆瓣官网；被机房 IP 限流时可指向自建中转，
+    # 不用改代码：环境变量 DOUBAN_WWW_HOST，或往 /data/www_host.txt 写地址
+    WWW_HOST = _www_host()
     WWW_UA = ("Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
               "(KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36")
     NEED_LOGIN_HINT = "未登录无法查看更多内容"

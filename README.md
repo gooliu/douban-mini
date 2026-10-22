@@ -217,7 +217,60 @@ Render 免费层 15 分钟无访问会休眠，第一次打开要等 30 秒左�
 > 旧地址落到别的设备上直接返回 502。填云端平台给的 `https://xxx.onrender.com`
 > 这类固定域名才靠谱。
 
-#### 方式一：Zeabur（免信用卡、中文界面、国内访问快，首选）
+#### 方式一：国内轻量云服务器（自建，最可控 —— 国内 IP，豆瓣风控最少）
+
+适合想把服务完全握在自己手里、并且**不想被豆瓣风控**的情况：豆瓣对境外 IP
+（Render / Zeabur / Koyeb 都在海外）风控明显更严，国内服务器基本不会出现
+「机器人程序」提示。腾讯云 / 阿里云「轻量应用服务器」新用户 2核2G 约 60~120 元/年。
+
+后端镜像里**已经带上了网页**（`/web`），所以服务器上是一个地址同时提供页面和接口，
+**同源**，不存在 HTTPS 页面调 HTTP 接口被浏览器拦截的问题。
+
+> ⚠️ **国内服务器两个特有的坑，先看明白再动手**
+>
+> 1. **安全组（防火墙）必须手动放行端口**，否则 100% 打不开。
+>    去云厂商控制台 → 服务器详情 → 防火墙 / 安全组 → 添加规则：TCP、端口 80、来源 0.0.0.0/0。
+> 2. **备案**：国内服务器用 80/443 端口 + **域名**访问，域名必须 ICP 备案，
+>    未备案会被云厂商拦截。**纯 IP 访问不受这条限制**，所以不想备案就直接用 IP。
+
+**步骤**（不用懂 Linux，复制粘贴即可）：
+
+1. 买一台轻量服务器，系统选 **Ubuntu 22.04**（腾讯云 / 阿里云 / 华为云都可以）
+2. 控制台放行 **TCP 80** 端口（见上面坑 1）
+3. 登录服务器：腾讯云 / 阿里云控制台都有 **WebShell / 一键登录**，不用装 SSH 客户端
+4. 在终端里粘贴这两行（装 Docker、拉代码、构建、启动全自动）：
+
+   ```bash
+   curl -fsSL https://raw.githubusercontent.com/gooliu/douban-mini/main/deploy/一键部署.sh -o install.sh
+   bash install.sh
+   ```
+
+5. 脚本跑完会打印地址，浏览器打开 **`http://你的服务器IP/`** 即可
+
+> 服务器访问 GitHub 拉不动代码？在本机把整个项目打包成 zip，上传到服务器解压，
+> 再 `cd douban-mini && bash deploy/一键部署.sh`。
+
+**日常维护**
+
+```bash
+docker logs -f douban-mini                                        # 看日志
+cd ~/douban-mini && docker compose -f deploy/docker-compose.yml restart   # 重启
+cd ~/douban-mini && bash deploy/更新.sh                            # 拉最新代码并重建
+```
+
+补充记录存在 Docker 卷 `app-data` 里，**更新 / 重建容器都不会丢**。
+
+**想要 HTTPS**（域名已备案时）：把域名 A 记录指向服务器，然后
+
+```bash
+DOMAIN=your.domain docker compose -f deploy/docker-compose.yml --profile https up -d
+```
+
+Caddy 会自动申请并续期 Let's Encrypt 证书。有了 HTTPS 之后，就可以把
+`https://your.domain` 填进 `web/index.html` 的 `DEFAULT_CLOUD_API` 并推送，
+**GitHub Pages 那个 github.io 网址也能用这台服务器了**。
+
+#### 方式二：Zeabur（免信用卡、中文界面、免费起步）
 
 1. 打开 <https://zeabur.com> → **用 GitHub 账号登录**
 2. 新建一个项目（区域选 **香港 / 东京**，离国内最近）
@@ -232,7 +285,7 @@ Render 免费层 15 分钟无访问会休眠，第一次打开要等 30 秒左�
 > Zeabur Free Plan **不需要信用卡**，注册即可部署；免费版空闲会休眠，
 > 冷启动只有几秒（比 Render 的 30~60 秒好很多）。
 
-#### 方式二：Render（老牌，但可能要预授权）
+#### 方式三：Render（老牌，但可能要预授权）
 
 1. 打开 <https://render.com> → **Sign in with GitHub**
 2. 右上角 `New +` → **Blueprint** → 选 `gooliu/douban-mini` → `Apply`
@@ -244,7 +297,7 @@ Render 免费层 15 分钟无访问会休眠，第一次打开要等 30 秒左�
 > Render 免费层的两个已知坑：15 分钟无访问休眠（唤醒 30~60 秒，页面会提示
 > 「⏳ 后端正在启动」）；没有持久磁盘，重新部署后补充记录会丢。
 
-#### 方式三：其它平台
+#### 方式四：其它平台
 
 `Dockerfile` 是通用的，Koyeb / Northflank / Railway / Fly.io / 自建服务器都能直接用：
 
@@ -252,6 +305,9 @@ Render 免费层 15 分钟无访问会休眠，第一次打开要等 30 秒左�
 docker build -t douban-mini .
 docker run -d -p 8000:8000 -e DOUBAN_CLOUD=1 \
   -v douban-data:/data douban-mini      # 挂卷才能保住补充记录
+
+# 或者用现成的 compose（含持久卷 + 健康检查）
+docker compose -f deploy/docker-compose.yml up -d --build
 ```
 
 免费额度参考（2026-10）：**Northflank** 免费层常驻不休眠、不用信用卡；
@@ -333,6 +389,13 @@ douban-mini/
 │   └── requirements.txt
 ├── web/
 │   └── index.html         # Web 网页版（单文件，浏览器直接用）
+├── deploy/                # 国内服务器 / VPS 一键部署
+│   ├── 一键部署.sh         #   装 Docker → 拉代码 → 构建 → 启动 → 自检
+│   ├── 更新.sh            #   拉最新代码并重建（补充记录不丢）
+│   ├── docker-compose.yml #   后端 + 持久卷（--profile https 可加 Caddy 自动 HTTPS）
+│   └── Caddyfile          #   自动 HTTPS 配置（需已备案域名）
+├── Dockerfile
+├── render.yaml
 └── miniprogram/
     ├── app.js / app.json / app.wxss
     ├── utils/api.js       # 请求封装

@@ -3,3 +3,5 @@
 
 # Windows 批处理必须 CRLF，否则双击可能异常
 *.bat text eol=crlf
+# Shell 脚本必须 LF，否则 Linux 上执行会报 bad interpreter
+*.sh text eol=lf

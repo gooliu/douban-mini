@@ -14,8 +14,10 @@ ENV PYTHONUNBUFFERED=1 \
 
 WORKDIR /app
 
+# 国内服务器构建慢？加 --build-arg PIP_INDEX_URL=https://pypi.tuna.tsinghua.edu.cn/simple
+ARG PIP_INDEX_URL=
 COPY backend/requirements.txt ./requirements.txt
-RUN pip install --no-cache-dir -r requirements.txt
+RUN pip install --no-cache-dir ${PIP_INDEX_URL:+--index-url $PIP_INDEX_URL} -r requirements.txt
 
 COPY backend/ ./backend/
 COPY web/ ./web/

@@ -72,6 +72,16 @@ UA = ("api-client/1 com.douban.frodo/7.22.0 (233) Android/22 product/shamu "
 # 连续命中时长按 60s → 120s → 240s → 480s → 900s（封顶）
 COOLDOWN_STEPS = [60, 120, 240, 480, 900]
 
+# 桌面版 www 页面（比 App 接口严格得多）：403/429 后先静默一段时间，
+# 期间不再发请求。实测阿里云机房出口被限流后，越重试恢复得越慢。
+WWW_COOLDOWN_SECS = int(os.getenv("DOUBAN_WWW_COOLDOWN", "600"))
+# 「他人加入的小组」结果缓存：同一 uid 在该 TTL 内重复查询直接返回上次结果，
+# 既省请求也避免用户连点把 IP 点进黑名单（列表变化本来就慢，15 分钟足够）
+WWW_CACHE_TTL = int(os.getenv("DOUBAN_WWW_CACHE_TTL", "900"))
+_WWW_RESULT_CACHE: dict[str, tuple[float, dict]] = {}
+_WWW_BLOCK_UNTIL: float = 0.0
+_WWW_BLOCK_HITS: int = 0      # 连续被 403 的次数：冷却按 600s→1200s→…→3600s 递增
+
 # 可通过环境变量覆盖
 DOUBAN_TOKEN = os.getenv("DOUBAN_TOKEN", "").strip()  # 登录态 Bearer token（抓包获取）
 # 豆瓣网页版 Cookie，形如 dbcl2="281065007:xxxxxxxx"
@@ -717,7 +727,9 @@ class DoubanClient:
     #                      → 该用户把可见范围设成了「仅登录用户」（**不是隐私**）
     #                        访客自己的 Cookie 有效时能读到，匿名叫不到
     #   3) 404 + 同级页也 404 → 仅自己可见 / 已关闭
-    WWW_HOST = "https://www.douban.com"
+    # 桌面版站点根。默认豆瓣官网；被机房 IP 限流时可指向自建反代，
+    # 不用改代码，只要给容器加环境变量 DOUBAN_WWW_HOST=https://your-proxy
+    WWW_HOST = (os.getenv("DOUBAN_WWW_HOST") or "https://www.douban.com").rstrip("/")
     WWW_UA = ("Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
               "(KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36")
     NEED_LOGIN_HINT = "未登录无法查看更多内容"
@@ -829,33 +841,64 @@ class DoubanClient:
         base = {"groups": [], "managed": [], "page_declared": None,
                 "with_cookie": has_ck, "cookie_accepted": None}
 
+        # ① 限流静默期内直接返回，绝不再打豆瓣（重试只会延长封禁）
+        global _WWW_BLOCK_UNTIL
+        left = int(_WWW_BLOCK_UNTIL - time.time())
+        if left > 0:
+            return {**base, "status": "blocked", "retry_after": left,
+                    "cookie_accepted": False if has_ck else None}
+
+        # ② 命中缓存：同一 uid 在 TTL 内不重复请求
+        hit = _WWW_RESULT_CACHE.get(uid)
+        if hit and (time.time() - hit[0]) < WWW_CACHE_TTL:
+            return {**hit[1], "cached": True,
+                    "cache_age": int(time.time() - hit[0])}
+
         status, html = await self._get_www_page(f"/group/people/{uid}/joins")
         if status == 200:
             parsed = self._parse_www_groups(html)
             if parsed["groups"] or parsed["managed"]:
-                return {**base, **parsed, "status": "ok",
-                        "cookie_accepted": self._looks_logged_in(html)}
+                return self._remember(uid, {**base, **parsed, "status": "ok",
+                                            "cookie_accepted": self._looks_logged_in(html)})
 
         # joins 打不开：再看 people/:uid/groups —— 它的 403 正文会明说「未登录无法查看更多内容」
         st2, html2 = await self._get_www_page(f"/people/{uid}/groups")
         if st2 == 200:
             parsed = self._parse_www_groups(html2)
             if parsed["groups"] or parsed["managed"]:
-                return {**base, **parsed, "status": "ok", "partial": True,
-                        "cookie_accepted": self._looks_logged_in(html2)}
+                return self._remember(uid, {**base, **parsed, "status": "ok", "partial": True,
+                                            "cookie_accepted": self._looks_logged_in(html2)})
 
         if (self.NEED_LOGIN_HINT in (html or "")
                 or self.NEED_LOGIN_HINT in (html2 or "")):
-            return {**base, "status": "login_required",
-                    "cookie_accepted": False if has_ck else None}
+            return self._remember(uid, {**base, "status": "login_required",
+                                        "cookie_accepted": False if has_ck else None})
 
         if status in (403, 429) or st2 in (403, 429):
-            return {**base, "status": "blocked",
+            # 进入静默期：接下来一段时间不再碰 www，且越连续被封得越久
+            global _WWW_BLOCK_HITS
+            secs = min(WWW_COOLDOWN_SECS * (2 ** _WWW_BLOCK_HITS), 3600)
+            _WWW_BLOCK_HITS += 1
+            _WWW_BLOCK_UNTIL = time.time() + secs
+            return {**base, "status": "blocked", "retry_after": secs,
+                    "block_hits": _WWW_BLOCK_HITS,
                     "cookie_accepted": False if has_ck else None}
 
         # 连登录提示都没有：看用户本身还在不在
         st3, _ = await self._get_www_page(f"/group/people/{uid}/")
-        return {**base, "status": "hidden" if st3 == 200 else "missing"}
+        return self._remember(uid, {**base, "status": "hidden" if st3 == 200 else "missing"})
+
+    @staticmethod
+    def _remember(uid: str, res: dict) -> dict:
+        """把确定性的结果放进缓存（blocked 不缓存，它不代表用户真实状态）"""
+        global _WWW_BLOCK_HITS
+        if res.get("status") in ("ok", "login_required", "hidden", "missing"):
+            _WWW_BLOCK_HITS = 0          # 能通就退出退避，下次被封重新从 600s 算起
+            if len(_WWW_RESULT_CACHE) >= 500:      # 简单防膨胀
+                for k in list(_WWW_RESULT_CACHE)[:100]:
+                    _WWW_RESULT_CACHE.pop(k, None)
+            _WWW_RESULT_CACHE[uid] = (time.time(), res)
+        return res
 
     async def check_uid_in_group(self, group_id: str, user_id: str,
                                  max_members: int = 3000,

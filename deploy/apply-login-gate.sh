@@ -81,6 +81,10 @@ for uid in 63425139 207700707 1097726; do
 done
 
 echo
-echo "判定：三个接口都应 HTTP 200；63425139 应为 ok，207700707/1097726 应为 login_required。"
+echo "判定：三个接口都应是 HTTP 200。"
+echo "  ok             = 正常列出（63425139 应为这个）"
+echo "  login_required = 对方设了「仅登录用户可见」（207700707 / 1097726 应为这个）"
+echo "  blocked        = 服务器 IP 被豆瓣临时限流，不是用户隐私；等 20~30 分钟再刷。"
+echo "                   代码已加冷却（600s 起、连续命中翻倍封顶 1 小时），期间不会反复打豆瓣。"
 echo "然后浏览器 Ctrl+F5 强刷 http://43.108.119.94/ 即可看到新版。"
 echo "回滚：docker exec $CT sh -c 'cp /app/backend/main.py.bak2 /app/backend/main.py; cp /app/web/index.html /app/web/index.html.bak2' && docker restart $CT"

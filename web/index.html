@@ -1184,6 +1184,7 @@ function banner(res) {
     let title = '豆瓣接口限制';
     if (rd.login_required) title = 'TA 的小组只对登录用户可见';
     else if (rd.hidden_only) title = 'TA 的小组仅自己可见';
+    else if (rd.status === 'blocked') title = '服务器 IP 被豆瓣临时限流';
     let m = esc(res.message || '该数据无公开接口');
     if (/登录|token/i.test(res.message || '')) {
       m += ' <span class="relink" onclick="openTokenModal()">点此更新登录</span>';
@@ -2103,6 +2104,8 @@ async function renderGroups() {
 
   const priv = !!d.privacy_hidden;
   const needLogin = !!d.login_required;
+  const blocked = d.status === 'blocked';
+  const waitMin = Math.max(1, Math.round((d.retry_after || 600) / 60));
   const claimed = d.claimed_total || 0;
   if (chkState.uid !== String(currentUser.id)) {     // 换个人就清掉上一轮的候选小组
     chkState = { groups: [], busy: false, uid: String(currentUser.id) };
@@ -2139,9 +2142,11 @@ async function renderGroups() {
     html += `<div class="chk-desc" style="padding:0 2px 4px">
       ${needLogin
         ? '列表只对「登录用户」开放，匿名抓不到具体是哪些组 —— 把你的豆瓣 Cookie 粘到登录里再查可能就能读到；读不到就用下面的「逐个核对」确认 TA 在不在指定小组。'
-        : (priv
-          ? '列表设成了仅自己可见，登录了也取不到 —— 用下面的「逐个核对」确认 TA 在不在指定小组。'
-          : '暂时没有拿到 TA 的小组列表 —— 用下面的「逐个核对」确认 TA 在不在指定小组。')}
+        : (blocked
+          ? `豆瓣把这个服务器的 IP 临时限流了，不是 TA 设了隐私、也不是没有小组 —— 约 ${waitMin} 分钟后自动恢复，期间别反复刷新（越刷恢复越慢）。急着查就用下面的「逐个核对」。`
+          : (priv
+            ? '列表设成了仅自己可见，登录了也取不到 —— 用下面的「逐个核对」确认 TA 在不在指定小组。'
+            : '暂时没有拿到 TA 的小组列表 —— 用下面的「逐个核对」确认 TA 在不在指定小组。'))}
     </div>`;
   } else {
     html += '<div class="empty">没有找到加入的小组</div>';

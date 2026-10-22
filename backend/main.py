@@ -749,9 +749,11 @@ async def get_user_groups(user_id: str, start: int = 0, count: int = Query(50, l
             message=f"来自豆瓣桌面版页面{note}")
 
     if www.get("status") == "blocked":
-        return Resp(ok=True, source="restricted", data={"total": 0, "groups": []},
-                    message="豆瓣网页暂时拒绝了这次请求（反爬 403/429）。"
-                            "等一两分钟再刷新一次就好，不用换账号。")
+        return Resp(ok=True, source="restricted", data={"total": 0, "groups": [],
+                                                        "retry_after": www.get("retry_after")},
+                    message="豆瓣把这个服务器的 IP 临时限流了（403/反爬），不是用户的问题。"
+                            f"约 {max(1, int(www.get('retry_after') or 600) // 60)} 分钟后自动恢复，"
+                            "期间别反复刷新。")
 
     if www.get("status") == "missing":
         return Resp(ok=False, source="restricted", data={"total": 0, "groups": []},
@@ -807,14 +809,17 @@ async def get_user_joined_groups(user_id: str):
             "hidden": "TA 的小组设成了「仅自己可见」，豆瓣把列表页变成「页面不存在」，"
                       "登录了也看不到。请改用「隐藏小组排查」逐个核对。",
             "missing": f"豆瓣上没有 uid 为 {user_id} 的用户。",
-            "blocked": "豆瓣网页暂时拒绝了请求（反爬），稍等一两分钟再试。",
+            "blocked": "豆瓣把这个服务器的 IP 临时限流了（403/反爬），不是这个用户的问题。"
+                       f"约 {max(1, int(www.get('retry_after') or 600) // 60)} 分钟后自动恢复，"
+                       "期间重复点击只会让恢复更慢；急着查就用下面的「隐藏小组排查」逐个核对。",
         }.get(www["status"], "未能获取该用户的小组列表。")
         return Resp(ok=True, source="restricted",
                     data={"status": www["status"], "groups": [], "managed": [],
                           "claimed_total": claimed,
                           "login_required": www["status"] == "login_required",
                           "with_cookie": www.get("with_cookie"),
-                          "cookie_accepted": www.get("cookie_accepted")},
+                          "cookie_accepted": www.get("cookie_accepted"),
+                          "retry_after": www.get("retry_after")},
                     message=msg)
 
     return Resp(ok=True, source="douban",
@@ -823,6 +828,8 @@ async def get_user_joined_groups(user_id: str):
                       "managed": www["managed"],
                       "claimed_total": claimed,
                       "partial": bool(www.get("partial")),
+                      "cached": bool(www.get("cached")),
+                      "cache_age": www.get("cache_age"),
                       "listed_total": len(www["groups"]) + len(www["managed"]),
                       "complete": (not www.get("partial")) and
                                   (claimed == 0 or

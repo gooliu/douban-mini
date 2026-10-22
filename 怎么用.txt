@@ -1,0 +1,107 @@
+怎么用 —— 隐藏小组排查更新包
+================================
+
+主推路线：GitHub 网页上传（已验证可行，绕开 Workbench）
+------------------------------------------------------
+Workbench 上传在这台韩国机器上会报 FileNotFound（境外节点的文件管理/OSS 中转常不可用），
+所以走 GitHub：你传上去，服务器自己来下载。
+
+【第 1 步】浏览器打开仓库首页
+    https://github.com/gooliu/douban-mini
+
+    ⚠️ 一定要停在**仓库首页**——页面上能看到 README.md、backend、web、deploy
+       这几个并列的那一层。不要点进 backend 或 web 里面去。
+
+【第 2 步】把整个文件夹拖进去
+    打开桌面上的  douban-mini-update  文件夹（先解压 zip 得到它），
+    选中整个文件夹，**直接拖到 GitHub 仓库首页的空白处**。
+
+    GitHub 会保留目录层级，自动生成这几个文件：
+        douban-mini-update/backend/main.py
+        douban-mini-update/backend/douban_client.py
+        douban-mini-update/web/index.html
+        douban-mini-update/应用更新-隐藏小组排查.sh
+        douban-mini-update/怎么用.txt
+
+    松开鼠标后页面下方出现文件列表 → 点绿色按钮 **Commit changes** → 再点一次确认。
+
+    怎么确认成功了：刷新仓库首页，能看到多出一个 `douban-mini-update` 文件夹。
+
+【第 3 步】服务器终端粘贴这一整段，回车
+（全部是英文/数字，不用敲中文文件名）
+
+sudo -i
+cd /root && curl -fsSL -o mini.zip https://codeload.github.com/gooliu/douban-mini/zip/refs/heads/main && unzip -q -o mini.zip && mv -f douban-mini-main douban-mini && for f in /root/douban-mini/douban-mini-update/*.sh; do cd "$(dirname "$f")" && bash "$f"; break; done
+
+脚本会自动做四件事：
+  1. 检查容器 douban-mini 在不在跑
+  2. 把 3 个文件复制进容器（不用重建镜像，几秒就好）
+  3. 重启容器
+  4. 自检：Python 语法 → 页面含新功能 → **测试这台韩国机器能不能抓到豆瓣桌面版**
+     （最后这条最关键，抓不到的话新功能会提示「反爬」，得换国内地域的机器）
+
+【第 4 步】浏览器打开 http://43.108.119.94/  按 Ctrl + F5 强刷
+页面上出现「隐藏小组排查」就说明生效了。
+
+
+备选路线：Workbench 文件管理（国内地域好用，境外常报 FileNotFound）
+------------------------------------------------------------------
+连上服务器后看**左侧竖排图标最上面那个「文件管理」**（文件夹图标）→ 点开 →
+左侧文件树双击进目标目录 → 右边点「上传文件」，或在左侧文件树**右键目录 → 上传**。
+
+三条限制：
+  · 一次只能传**单个文件**，所以才打包成 zip（别解压了传）
+  · 一键连接是 admin 身份，只能写 /home/admin、/tmp；要传 /root 必须用
+    **Workbench 密码登录**（root 密码没设过就先去实例详情「设置密码」）
+  · 传完看右下角进度条，绿色对勾 + 100% 才算成功
+
+传完之后在终端粘贴（自动找 zip 解压，同样不用打中文）：
+
+cd ~ && python3 - <<'PY'
+import zipfile, glob, os
+home = os.path.expanduser('~')
+hit = None
+for z in glob.glob(os.path.join(home, '*.zip')):
+    try:
+        names = zipfile.ZipFile(z).namelist()
+    except Exception:
+        continue
+    if any(n.startswith('douban-mini-update/') for n in names):
+        hit = z
+        break
+if not hit:
+    print('没找到更新包，确认上传成功了吗？'); raise SystemExit(1)
+zipfile.ZipFile(hit).extractall(home)
+print('已解压:', os.path.basename(hit))
+PY
+cd ~/douban-mini-update && bash 应用更新-隐藏小组排查.sh
+
+
+第三条路：本机 scp（要 root 密码）
+----------------------------------
+控制台先给实例**重置/设置 root 密码**并重启，然后在本机 Git Bash 里跑：
+
+    scp C:/Users/73117/Desktop/douban-mini-update-隐藏小组排查.zip root@43.108.119.94:/root/
+
+密码输入时屏幕上不显示字符，直接敲完回车即可。之后再用上面那段 python 解压+执行。
+
+
+出问题怎么办
+------------
+· 「找不到运行中的容器 douban-mini」：先 docker ps -a 看看容器叫什么
+· 自检显示「豆瓣桌面版页面不可达」：韩国 IP 被豆瓣拦了，小组列表功能用不了，
+  需要换国内地域的服务器
+· GitHub 打不开 / 拖不上去：用备选路线的 Workbench，或第三条 scp
+
+
+这次改了什么
+------------
+· backend/douban_client.py
+    fetch_joined_groups_www(uid)  抓桌面版公开页，匿名可读，一次拿全量小组
+    check_uid_in_group(gid, uid)  翻指定小组的成员名单核对某个 uid
+· backend/main.py
+    GET  /api/user/{uid}/joined-groups    他人加入的小组
+    POST /api/check-membership            多选小组排查 uid 是否在组内
+    改造 GET /api/user/{uid}/groups，让他人也能直接看到小组列表
+· web/index.html
+    新增「隐藏小组排查」面板 + 小组列表页的排查入口

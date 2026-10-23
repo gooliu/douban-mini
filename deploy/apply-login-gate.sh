@@ -11,8 +11,8 @@ CT=douban-mini
 # 别写死 /root —— 阿里云 Workbench 的 shell 有时不是 root，会 Permission denied
 WORK="${HOME:-/tmp}/dbm-apply"
 URL_ZIP="https://codeload.github.com/gooliu/douban-mini/zip/refs/heads/main"
-URL_PKG="https://raw.githubusercontent.com/gooliu/douban-mini/main/deploy/douban-mini-update-login-gate.zip"
-MD5_EXPECT="ee8ca21db5adabd4cf50d737097d4682"
+URL_PKG="https://raw.githubusercontent.com/gooliu/douban-mini/main/deploy/douban-mini-update-hhy.zip"
+MD5_EXPECT="60f9f68c35876ae710018f3383d12c72"
 
 die() { echo "!! $*"; exit 1; }
 

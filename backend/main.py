@@ -929,6 +929,69 @@ async def check_membership(body: MembershipIn):
                 message="；".join(tips) or "全部小组都已核对完毕。")
 
 
+# --------------------------------------------------------------------
+# 艺人后花园小组（数据源：豆瓣小组公开帖《db各家hhy合集》）
+# --------------------------------------------------------------------
+_HHY_FILE = FilePath(__file__).parent / "data" / "hhy_groups.json"
+_HHY_CACHE: dict = {"mtime": 0.0, "data": None}
+
+
+def _hhy_data() -> dict:
+    """读取「艺人 -> 后花园小组」对照表，按文件 mtime 缓存（换数据文件免重启）"""
+    empty = {"artists": [], "total_artists": 0, "total_groups": 0,
+             "source": "", "title": "", "collected_at": ""}
+    try:
+        mt = _HHY_FILE.stat().st_mtime
+    except OSError:
+        return empty
+    if _HHY_CACHE["data"] is not None and _HHY_CACHE["mtime"] == mt:
+        return _HHY_CACHE["data"]
+    try:
+        raw = _json.loads(_HHY_FILE.read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return _HHY_CACHE["data"] or empty
+    artists = []
+    for a in raw.get("artists") or []:
+        groups = [{"id": str(g.get("id", "")).strip(), "name": (g.get("name") or "").strip()}
+                  for g in (a.get("groups") or []) if str(g.get("id", "")).strip()]
+        name = (a.get("name") or "").strip()
+        if name and groups:
+            artists.append({"name": name, "groups": groups})
+    data = {"artists": artists,
+            "total_artists": len(artists),
+            "total_groups": sum(len(a["groups"]) for a in artists),
+            "source": raw.get("source", ""),
+            "title": raw.get("title", ""),
+            "collected_at": raw.get("collected_at", "")}
+    _HHY_CACHE.update({"mtime": mt, "data": data})
+    return data
+
+
+@app.get("/api/hhy/artists", response_model=Resp)
+async def hhy_artists(q: str = Query("", description="按艺人名筛选，留空返回全部")):
+    """【艺人后花园小组】艺人 -> 后花园小组（id + 名称）对照表
+
+    数据来自豆瓣公开帖《db各家hhy合集》（backend/data/hhy_groups.json）。
+    前端拿它把某位艺人的小组一键填进「隐藏小组排查」/「反查发言」的候选列表。
+    """
+    data = _hhy_data()
+    all_artists = data.get("artists") or []
+    key = (q or "").strip()
+    artists = [a for a in all_artists if key in a["name"] or a["name"] in key] if key else all_artists
+    total_groups = sum(len(a["groups"]) for a in artists)
+    if not all_artists:
+        return Resp(ok=False, source="local",
+                    data={"artists": [], "total_artists": 0, "total_groups": 0},
+                    message="后花园名单数据文件缺失（backend/data/hhy_groups.json）")
+    return Resp(ok=True, source="local",
+                data={"artists": artists, "query": key,
+                      "total_artists": len(artists), "total_groups": total_groups,
+                      "source": data.get("source", ""),
+                      "source_title": data.get("title", ""),
+                      "collected_at": data.get("collected_at", "")},
+                message=f"{len(artists)} 位艺人 / {total_groups} 个小组")
+
+
 @app.get("/api/user/{user_id}/topics", response_model=Resp)
 async def get_user_topics(user_id: str, start: int = 0, count: int = Query(50, le=100)):
     """用户历史发言记录（小组内发过的话题）

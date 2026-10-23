@@ -9,7 +9,9 @@ venv/
 backend/douban_config.json
 
 # ⚠️ 手动补充记录（私人笔记/截图），绝不能提交到公开仓库
-backend/data/
+# 目录内容全部忽略，但「艺人后花园名单」是公开数据，单独放行
+backend/data/*
+!backend/data/hhy_groups.json
 backend/notes_data/
 data/notes.json
 

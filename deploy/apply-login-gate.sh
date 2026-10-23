@@ -58,7 +58,7 @@ MAIN=$(find "$WORK" -path '*/backend/main.py' -print | head -1)
 [ -n "$MAIN" ] || die "没找到 backend/main.py（解压目录结构异常）"
 SRC=$(dirname "$(dirname "$MAIN")")
 echo "  源码目录: $SRC"
-for f in backend/main.py backend/douban_client.py web/index.html; do
+for f in backend/main.py backend/douban_client.py backend/data/hhy_groups.json web/index.html; do
   [ -f "$SRC/$f" ] || die "缺少 $f"
 done
 ls -l "$SRC/web/index.html" | awk '{print "  index.html:", $5, "字节"}'
@@ -66,15 +66,19 @@ ls -l "$SRC/web/index.html" | awk '{print "  index.html:", $5, "字节"}'
 echo "== 3/5 校验版本特征 =="
 grep -q "login_required" "$SRC/backend/douban_client.py" || die "douban_client.py 不含 login_required，是旧包"
 grep -q "DOUBAN_LIST_SCRAPE" "$SRC/backend/main.py" || die "main.py 不含 DOUBAN_LIST_SCRAPE 开关，是旧包"
+grep -q "api/hhy/artists" "$SRC/backend/main.py" || die "main.py 不含艺人后花园接口，是旧包"
 grep -q "TA 的小组只对登录用户可见" "$SRC/web/index.html" || die "index.html 不含登录门槛文案，是旧包"
-echo "  两个关键特征都在，是目标版本"
+grep -q "applyArtistToChk" "$SRC/web/index.html" || die "index.html 不含艺人套用入口，是旧包"
+echo "  关键特征都在，是目标版本"
 
 echo "== 4/5 备份并覆盖 =="
 ${DK}docker exec "$CT" sh -c 'cp /app/backend/main.py /app/backend/main.py.bak2 2>/dev/null; cp /app/web/index.html /app/web/index.html.bak2 2>/dev/null; echo "  旧文件已备份为 *.bak2"' || true
-${DK}docker cp "$SRC/backend/main.py"          "$CT:/app/backend/main.py"          >/dev/null || die "拷 main.py 失败"
-${DK}docker cp "$SRC/backend/douban_client.py" "$CT:/app/backend/douban_client.py" >/dev/null || die "拷 douban_client.py 失败"
-${DK}docker cp "$SRC/web/index.html"           "$CT:/app/web/index.html"           >/dev/null || die "拷 index.html 失败"
-echo "  三个文件已覆盖"
+${DK}docker exec "$CT" mkdir -p /app/backend/data
+${DK}docker cp "$SRC/backend/main.py"               "$CT:/app/backend/main.py"               >/dev/null || die "拷 main.py 失败"
+${DK}docker cp "$SRC/backend/douban_client.py"      "$CT:/app/backend/douban_client.py"      >/dev/null || die "拷 douban_client.py 失败"
+${DK}docker cp "$SRC/backend/data/hhy_groups.json"  "$CT:/app/backend/data/hhy_groups.json"  >/dev/null || die "拷 hhy_groups.json 失败"
+${DK}docker cp "$SRC/web/index.html"                "$CT:/app/web/index.html"                >/dev/null || die "拷 index.html 失败"
+echo "  四个文件已覆盖（含艺人后花园名单）"
 
 echo "== 5/5 重启并自检 =="
 ${DK}docker restart "$CT" >/dev/null || die "重启失败"
@@ -85,9 +89,10 @@ done
 ${DK}docker ps --filter "name=$CT" --format '  状态: {{.Status}}'
 
 echo "  --- 容器内版本特征 ---"
-${DK}docker exec "$CT" sh -c 'echo "  DOUBAN_LIST_SCRAPE 开关: $(grep -c DOUBAN_LIST_SCRAPE /app/backend/main.py)"; echo "  登录门槛文案命中: $(grep -c "只对登录用户可见" /app/web/index.html)"' || true
+${DK}docker exec "$CT" sh -c 'echo "  DOUBAN_LIST_SCRAPE 开关: $(grep -c DOUBAN_LIST_SCRAPE /app/backend/main.py)"; echo "  艺人后花园接口: $(grep -c "api/hhy/artists" /app/backend/main.py)"; echo "  艺人名单文件: $(ls /app/backend/data/hhy_groups.json 2>/dev/null || echo 缺失)"; echo "  艺人套用入口: $(grep -c applyArtistToChk /app/web/index.html)"' || true
 
-echo "  --- 接口实测（新版预期） ---"
+echo "  --- 接口实测 ---"
+echo "  [艺人后花园] $(curl -s -m 10 http://127.0.0.1/api/hhy/artists | grep -o '"message": *"[^"]*"' | head -1)"
 for uid in 63425139 207700707 1097726; do
   code=$(curl -s -o "$WORK/r.json" -w '%{http_code}' -m 25 "http://127.0.0.1/api/user/$uid/groups")
   dis=$(grep -o '"list_disabled": *[a-z]*' "$WORK/r.json" 2>/dev/null | head -1 | grep -o '[a-z]*$')

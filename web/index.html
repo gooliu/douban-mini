@@ -205,6 +205,22 @@
     border: 1px solid #e5e5e5; border-radius: 10px; outline: none;
   }
   .chk-panel input:focus { border-color: #42bd56; }
+
+  /* 艺人后花园（名单来自豆瓣公开帖《db各家hhy合集》） */
+  .hhy-box {
+    margin: 0 0 12px; padding: 10px 12px;
+    background: #f7fbf7; border: 1px dashed #cfe8d4; border-radius: 10px;
+  }
+  .chk-panel .hhy-box label { margin: 0 0 6px; }
+  .hhy-box .lp-row { margin: 0; }
+  .hhy-tip { font-size: 11px; color: #7a8f7f; line-height: 1.65; margin-top: 7px; }
+  .hhy-tip b { color: #2e7d43; }
+  .hhy-pick {
+    display: inline-block; margin: 6px 6px 0 0; padding: 4px 9px;
+    font-size: 12px; background: #eaf6ed; color: #2e7d43;
+    border-radius: 6px; cursor: pointer; border: 1px solid #cfe8d4;
+  }
+  .hhy-pick:hover { background: #dff0e3; }
   .chk-picked { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 10px; }
   .chk-chip {
     display: inline-flex; align-items: center; gap: 6px; font-size: 12px;
@@ -574,6 +590,8 @@
 </style>
 </head>
 <body>
+<!-- 艺人后花园名单自动补全（反查小组 / 反查发言 共用） -->
+<datalist id="hhyArtistList"></datalist>
 <div class="phone">
 
   <!-- 登录状态按钮（所有页面可见） -->
@@ -2141,6 +2159,7 @@ async function renderGroups() {
   box.innerHTML = html;
   mountNotes('notesBoxGroups', currentUser.id, currentUser.name);
   if ($('chkPanel')) renderChkChips();
+  if ($('chkArtist') || $('lkArtist')) loadHhy();   // 预取后花园名单，输入框才有自动补全
   if (res.source === 'restricted') loadInterests(currentUser.id);
 }
 
@@ -2885,9 +2904,18 @@ function lookupPanelHtml() {
         <div id="lkModePosts" class="lp-mode active" onclick="switchLkMode('posts')">📝 发帖</div>
         <div id="lkModeComments" class="lp-mode" onclick="switchLkMode('comments')">💬 回帖</div>
       </div>
+      <div class="hhy-box">
+        <label>🎯 按艺人后花园扫描</label>
+        <div class="lp-row">
+          <div><input id="lkArtist" list="hhyArtistList" placeholder="输入艺人名，如 成毅" autocomplete="off"></div>
+          <div style="width:auto"><button class="lp-btn" id="lkArtistBtn"
+            style="margin-top:0;padding:11px 18px;width:auto" onclick="applyArtistToLookup()">套用</button></div>
+        </div>
+        <div class="hhy-tip" id="lkArtistTip">套用后会把这个艺人的全部后花园小组填进下面的候选框，自动分批扫描。</div>
+      </div>
       <div class="lp-row">
         <div>
-          <label>候选小组 ID（逗号分隔，最多 8 个）</label>
+          <label>候选小组 ID（逗号分隔，可一次填多个，自动分批）</label>
           <input id="lkGroups" placeholder="例如 146409,736218">
         </div>
         <div>
@@ -2970,6 +2998,101 @@ function pickGroup(gid) {
 let chkState = { groups: [], busy: false };
 let chkSearchCache = {};
 
+/* ==================================================
+   艺人后花园小组（数据源：豆瓣公开帖《db各家hhy合集》）
+   反查小组 / 反查发言 两个面板共用同一份名单
+================================================== */
+let hhyState = { loaded: false, loading: false, artists: [], byName: new Map(), error: '' };
+
+async function loadHhy() {
+  if (hhyState.loaded) return hhyState.artists;
+  if (hhyState.loading) {
+    for (let i = 0; i < 100 && hhyState.loading; i++) await new Promise(r => setTimeout(r, 80));
+    return hhyState.artists;
+  }
+  hhyState.loading = true;
+  try {
+    const res = await api('/api/hhy/artists');
+    const d = res.data || {};
+    hhyState.artists = d.artists || [];
+    hhyState.byName = new Map(hhyState.artists.map(a => [a.name, a.groups]));
+    const dl = $('hhyArtistList');
+    if (dl) {
+      dl.innerHTML = hhyState.artists
+        .map(a => `<option value="${esc(a.name)}">${a.groups.length} 个小组</option>`).join('');
+    }
+  } catch (e) {
+    hhyState.error = e.message || '接口异常';
+  } finally {
+    hhyState.loading = false;
+    hhyState.loaded = true;    // 失败也不反复重试，免得每次输入都打接口
+  }
+  return hhyState.artists;
+}
+
+/* 精确名优先 → 唯一模糊命中 → 多个命中交给用户点选 */
+function hhyFind(name) {
+  const q = (name || '').trim();
+  if (!q) return { error: '请先输入艺人名' };
+  if (hhyState.byName.has(q)) return { artist: { name: q, groups: hhyState.byName.get(q) } };
+  const hits = hhyState.artists.filter(a => a.name.includes(q) || q.includes(a.name));
+  if (!hits.length) return { error: `名单里没有「${q}」，可以只输入姓氏试试` };
+  if (hits.length === 1) return { artist: hits[0] };
+  return { picks: hits };
+}
+
+async function applyArtistToChk()    { await hhyRun('chkArtist', 'chkArtistTip', 'chkArtistBtn', 'chk'); }
+async function applyArtistToLookup() { await hhyRun('lkArtist',  'lkArtistTip',  'lkArtistBtn',  'lk'); }
+
+async function hhyRun(inputId, tipId, btnId, target) {
+  const tip = $(tipId), btn = $(btnId), inp = $(inputId);
+  if (!tip || !inp) return;
+  const q = (inp.value || '').trim();
+  if (!q) { tip.innerHTML = '请先输入艺人名'; return; }
+  tip.innerHTML = '加载后花园名单…';
+  if (btn) btn.disabled = true;
+  await loadHhy();
+  if (btn) btn.disabled = false;
+  if (!hhyState.artists.length) {
+    tip.innerHTML = '后花园名单没加载成功'
+      + (hhyState.error ? '（' + esc(hhyState.error) + '）' : '')
+      + '，可以先手填小组 id。';
+    return;
+  }
+  const r = hhyFind(q);
+  if (r.error) { tip.innerHTML = esc(r.error); return; }
+  if (r.picks) {
+    tip.innerHTML = `「${esc(q)}」匹配到 ${r.picks.length} 位艺人，点一个套用：<br>`
+      + r.picks.slice(0, 12).map(a => `<span class="hhy-pick" data-n="${esc(a.name)}"
+          onclick="hhyUseArtist(this.dataset.n,'${target}')">${esc(a.name)} · ${a.groups.length} 组</span>`).join('');
+    return;
+  }
+  hhyUseArtist(r.artist.name, target, r.artist);
+}
+
+function hhyUseArtist(name, target, artist) {
+  const a = artist || { name: name, groups: hhyState.byName.get(name) || [] };
+  if (!a.groups || !a.groups.length) return;
+  if (target === 'chk') {
+    addChkGroups(a.groups.map(g => ({ id: g.id, name: g.name })));
+    const inp = $('chkArtist'); if (inp) inp.value = a.name;
+    const tip = $('chkArtistTip');
+    if (tip) tip.innerHTML = `已套用 <b>${esc(a.name)}</b> 的 ${a.groups.length} 个后花园小组，`
+      + `候选共 ${chkState.groups.length} 个。点下面「开始排查」即可。`;
+  } else {
+    const inp = $('lkGroups');
+    if (inp) inp.value = a.groups.map(g => g.id).join(',');
+    const inp2 = $('lkArtist'); if (inp2) inp2.value = a.name;
+    const tip = $('lkArtistTip');
+    if (tip) {
+      const batches = Math.ceil(a.groups.length / 6);
+      tip.innerHTML = `已套用 <b>${esc(a.name)}</b> 的 ${a.groups.length} 个小组`
+        + (batches > 1 ? `，会分 ${batches} 批扫描（每批 6 个）` : '')
+        + '。点下面「开始反查」即可。';
+    }
+  }
+}
+
 function hiddenCheckPanelHtml() {
   return `
     <div class="chk-panel" id="chkPanel">
@@ -2978,6 +3101,15 @@ function hiddenCheckPanelHtml() {
         TA 的小组列表拿不到时，改成「逐个核对」：给出候选小组，我翻每个小组的<b>成员名单</b>找 TA 的 uid。<br>
         <b>✅ 命中</b> = 确定在组内；<b>❌ 翻完</b> = 确定不在；
         <b>⚠️ 未见其人</b> = 只说明已翻的那部分里没有 TA。
+      </div>
+      <div class="hhy-box">
+        <label>🎯 按艺人套用后花园小组</label>
+        <div class="lp-row">
+          <div><input id="chkArtist" list="hhyArtistList" placeholder="输入艺人名，如 成毅" autocomplete="off"></div>
+          <div style="width:auto"><button class="lp-btn" id="chkArtistBtn"
+            style="margin-top:0;padding:11px 18px;width:auto" onclick="applyArtistToChk()">套用</button></div>
+        </div>
+        <div class="hhy-tip" id="chkArtistTip">名单来自豆瓣公开帖，选一个艺人可把 TA 全部后花园小组一次性加进候选。</div>
       </div>
       <div class="chk-picked" id="chkChips"></div>
       <div class="lp-row" style="margin-top:12px">
@@ -3095,25 +3227,58 @@ async function doCheckMembership() {
   }
   const btn = $('chkBtn');
   const depth = parseInt(($('chkDepth') || {}).value || '3000', 10);
+  const all = chkState.groups.map(g => g.id);
+  // 后端单次最多 12 个小组；艺人后花园常有十几二十个，这里按 10 个一批跑，边跑边报进度
+  const CHK_BATCH = 10;
+  const batches = [];
+  for (let i = 0; i < all.length; i += CHK_BATCH) batches.push(all.slice(i, i + CHK_BATCH));
   chkState.busy = true;
   btn.disabled = true;
   btn.textContent = '正在翻成员名单，请稍候…';
   $('chkResult').innerHTML =
-    '<div class="empty">正在核对 ' + chkState.groups.length + ' 个小组的成员名单…</div>';
+    '<div class="empty">正在核对 ' + all.length + ' 个小组的成员名单…</div>';
 
   try {
-    const res = await fetch(API + '/api/check-membership', {
-      method: 'POST',
-      headers: Object.assign({ 'Content-Type': 'application/json' }, credHeaders()),
-      body: JSON.stringify({
-        user_id: String(currentUser.id),
-        groups: chkState.groups.map(g => g.id),
-        max_members: depth,
-      }),
-    });
-    const j = await res.json().catch(() => ({}));
-    if (!res.ok || !j.ok) throw new Error(j.detail || j.message || ('HTTP ' + res.status));
-    renderChkResult(j);
+    const rows = [];
+    let lastMsg = '';
+    for (let i = 0; i < batches.length; i++) {
+      if (batches.length > 1) {
+        $('chkResult').innerHTML = '<div class="empty">正在核对第 ' + (i + 1) + '/' + batches.length
+          + ' 批（' + batches[i].length + ' 个小组）… 已完成 ' + rows.length + '/' + all.length + '</div>';
+      }
+      const res = await fetch(API + '/api/check-membership', {
+        method: 'POST',
+        headers: Object.assign({ 'Content-Type': 'application/json' }, credHeaders()),
+        body: JSON.stringify({
+          user_id: String(currentUser.id),
+          groups: batches[i],
+          max_members: depth,
+        }),
+      });
+      const j = await res.json().catch(() => ({}));
+      if (!res.ok || !j.ok) throw new Error(j.detail || j.message || ('HTTP ' + res.status));
+      rows.push(...(((j.data || {}).results) || []));
+      lastMsg = j.message || lastMsg;
+    }
+
+    if (batches.length === 1) {
+      renderChkResult({ data: { results: rows }, message: lastMsg });
+    } else {
+      const cnt = v => rows.filter(r => r.verdict === v).length;
+      const hit = rows.filter(r => r.verdict === 'in');
+      const tips = [];
+      if (hit.length) {
+        tips.push('✅ 在 ' + hit.length + ' 个小组的成员名单里找到了 TA：'
+          + hit.map(r => r.group_name || r.group_id).join('、'));
+      }
+      if (cnt('out')) tips.push('❌ ' + cnt('out') + ' 个小组已全量翻完，确定 TA 不在其中');
+      if (cnt('unknown')) tips.push('⚠️ ' + cnt('unknown') + ' 个小组没翻完，没找到不等于不在');
+      renderChkResult({
+        data: { results: rows, found_count: hit.length,
+                ruled_out_count: cnt('out'), unknown_count: cnt('unknown') },
+        message: tips.join('；') || ('已核对全部 ' + rows.length + ' 个小组。'),
+      });
+    }
   } catch (e) {
     $('chkResult').innerHTML = '<div class="info-banner">' + esc(e.message) + '</div>';
   } finally {
@@ -3164,31 +3329,86 @@ async function doReverseLookup() {
   const groups = ($('lkGroups').value || '').replace(/[，、\s]+/g, ',').split(',').filter(Boolean);
   const pages = Math.min(20, Math.max(1, parseInt($('lkPages').value || '4', 10)));
   if (!groups.length) {
-    box.innerHTML = '<div class="info-banner">请先填写候选小组 ID（可点下方按钮搜索）</div>';
+    box.innerHTML = '<div class="info-banner">请先填写候选小组 ID（可用上方「按艺人后花园扫描」一键填入）</div>';
     return;
   }
   const btn = $('lkBtn');
   const oldText = btn.textContent;
-  btn.disabled = true; btn.textContent = '扫描中，请稍候…';
-  box.innerHTML = '<div class="empty">正在扫描 ' + groups.length + ' 个小组…</div>';
 
-  const endpoint = lkMode === 'comments'
+  // 后端单次最多扫 8 个小组；艺人后花园常有十几二十个 → 按 6 个一批跑，边跑边报进度
+  const BATCH = 6;
+  const batches = [];
+  for (let i = 0; i < groups.length; i += BATCH) batches.push(groups.slice(i, i + BATCH));
+
+  const urlFor = gs => lkMode === 'comments'
     ? '/api/user/' + encodeURIComponent(currentUser.id) +
-      '/comments-in-groups?groups=' + encodeURIComponent(groups.join(',')) +
+      '/comments-in-groups?groups=' + encodeURIComponent(gs.join(',')) +
       '&topic_pages=' + pages + '&comments_per_topic=20'
     : '/api/user/' + encodeURIComponent(currentUser.id) +
-      '/posts-in-groups?groups=' + encodeURIComponent(groups.join(',')) + '&pages=' + pages;
+      '/posts-in-groups?groups=' + encodeURIComponent(gs.join(',')) + '&pages=' + pages;
 
-  let res;
+  btn.disabled = true; btn.textContent = '扫描中，请稍候…';
+  const topics = [], comments = [], failed = [];
+  let scanned = 0, topicsScanned = 0, oldest = '';
+
   try {
-    res = await api(endpoint);
-  } catch (e) {
-    box.innerHTML = '<div class="info-banner">' + esc(e.message) + '</div>';
-    btn.disabled = false; btn.textContent = oldText;
-    return;
+    for (let i = 0; i < batches.length; i++) {
+      box.innerHTML = '<div class="empty">正在扫描第 ' + (i + 1) + '/' + batches.length
+        + ' 批（' + batches[i].length + ' 个小组）… 已完成 ' + scanned + '/' + groups.length + ' 组</div>';
+      let res;
+      try {
+        res = await api(urlFor(batches[i]));
+      } catch (e) {
+        // 某一批失败不整体中断：记下来继续扫，最后如实告诉用户哪批没成
+        failed.push({ msg: '第 ' + (i + 1) + ' 批：' + e.message });
+        continue;
+      }
+      const d = res.data || {};
+      if (d.need_login || res.source === 'restricted') {   // 要登录：立刻给出登录提示，别继续白扫
+        btn.disabled = false; btn.textContent = oldText;
+        renderLookupResult(res);
+        return;
+      }
+      scanned += batches[i].length;
+      topicsScanned += d.topics_scanned || 0;
+      if (d.topics) topics.push(...d.topics);
+      if (d.comments) comments.push(...d.comments);
+      if (d.failed_groups) failed.push(...d.failed_groups);
+      if (d.covered_from && (!oldest || d.covered_from < oldest)) oldest = d.covered_from;
+    }
   } finally {
     btn.disabled = false; btn.textContent = oldText;
   }
+
+  // 已解散 / 不存在的小组不算「扫描被中断」，只提示跳过，别把结论说成不可信
+  const GONE = /不在|不存在|解散|已删除|已注销/;
+  const gone = failed.filter(f => GONE.test(f.msg || ''));
+  const realFailed = failed.filter(f => !GONE.test(f.msg || ''));
+  const warnText = realFailed.length
+    ? (realFailed.some(f => f.need_login) ? '豆瓣要求登录后才能扫描这批小组：' : '')
+      + realFailed.length + '/' + groups.length + ' 个小组没扫完（'
+      + (realFailed[0].msg || '').slice(0, 60) + '）。'
+    : '';
+
+  const mine = lkMode === 'comments' ? comments : topics;
+  renderLookupResult({
+    ok: true, source: 'douban',
+    data: {
+      topics: topics, comments: comments, total: mine.length, need_login: false,
+      failed_groups: realFailed, warning: warnText || undefined,
+      note: '已扫描 ' + (groups.length - gone.length) + '/' + groups.length + ' 个小组'
+        + (batches.length > 1 ? '（分 ' + batches.length + ' 批）' : '')
+        + (gone.length ? '，跳过 ' + gone.length + ' 个已不存在的小组' : '')
+        + (topicsScanned ? '，共 ' + topicsScanned + ' 条话题' : '')
+        + (oldest ? '，最早覆盖到 ' + oldest : '')
+        + '，命中 ' + mine.length + ' 条。',
+    },
+  });
+}
+
+/* 渲染反查结果（单批 / 多批合并后共用） */
+function renderLookupResult(res) {
+  const box = $('lkResult');
   const d = res.data || {};
 
   if (lkMode === 'comments') {

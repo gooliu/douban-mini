@@ -68,6 +68,22 @@ checks = [
     ("banner 区分列表不抓取", "TA 的小组列表不抓取，直接排查" in script),
     ("后端默认不抓他人列表页", "DOUBAN_LIST_SCRAPE" in BACKEND),
     ("后端有 login_required 判定", "login_required" in BACKEND),
+
+    # 2026-10-23：艺人后花园小组（数据来自豆瓣《db各家hhy合集》）
+    ("艺人名单接口 /api/hhy/artists", "/api/hhy/artists" in BACKEND),
+    ("艺人数据文件已就位", os.path.exists(
+        os.path.join(BASE, "backend", "data", "hhy_groups.json"))),
+    ("艺人名单懒加载 loadHhy", "async function loadHhy" in script),
+    ("艺人名模糊匹配 hhyFind", "function hhyFind" in script),
+    ("反查小组套用艺人", "function applyArtistToChk" in script),
+    ("反查发言套用艺人", "function applyArtistToLookup" in script),
+    ("自动补全 datalist", 'id="hhyArtistList"' in html),
+    ("排查面板有艺人入口", 'id="chkArtist"' in html),
+    ("反查面板有艺人入口", 'id="lkArtist"' in html),
+    ("排查按 10 个一批", "const CHK_BATCH = 10;" in script),
+    ("反查按 6 个一批", "const BATCH = 6;" in script),
+    ("反查结果渲染已抽出", "function renderLookupResult" in script),
+    ("渲染函数被调用", "renderLookupResult(res);" in script),
 ]
 bad = [n for n, ok in checks if not ok]
 for n, ok in checks:

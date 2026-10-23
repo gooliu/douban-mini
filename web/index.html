@@ -1182,7 +1182,8 @@ function banner(res) {
   if (res.source === 'restricted') {
     const rd = res.data || {};
     let title = '豆瓣接口限制';
-    if (rd.login_required) title = 'TA 的小组只对登录用户可见';
+    if (rd.list_disabled) title = 'TA 的小组列表不抓取，直接排查';
+    else if (rd.login_required) title = 'TA 的小组只对登录用户可见';
     else if (rd.hidden_only) title = 'TA 的小组仅自己可见';
     else if (rd.status === 'blocked') title = '服务器 IP 被豆瓣临时限流';
     let m = esc(res.message || '该数据无公开接口');
@@ -2102,32 +2103,19 @@ async function renderGroups() {
     </div>
     ${banner(res)}`;
 
-  const priv = !!d.privacy_hidden;
-  const needLogin = !!d.login_required;
-  const blocked = d.status === 'blocked';
-  const waitMin = Math.max(1, Math.round((d.retry_after || 600) / 60));
-  const claimed = d.claimed_total || 0;
   if (chkState.uid !== String(currentUser.id)) {     // 换个人就清掉上一轮的候选小组
     chkState = { groups: [], busy: false, uid: String(currentUser.id) };
   }
 
-  /* ① 加入的小组：能拿到就自然列出；拿不到就说明原因 + 声明数量 */
-  if (groups.length) {
-    html += `<div class="list-header">加入的小组（${esc(d.total || groups.length)}）</div>`;
-    if (claimed && claimed > groups.length) {
-      html += `<div class="info-banner" style="background:#fff4e6">
-        <div class="ib-title">${d.partial ? '完整名单拉不到' : '有 ' + (claimed - groups.length) + ' 个小组没列出'}</div>
-        ${d.partial
-          ? `TA 的主页显示加入了 ${esc(claimed)} 个小组，这个页面只公开列出前 ${groups.length} 个 —— 完整的要登录才给。想知道 TA 在不在某个具体小组，用下面的排查。`
-          : `TA 的主页显示加入了 ${esc(claimed)} 个小组，页面上只列出 ${groups.length} 个 —— 豆瓣会按隐私/热度折叠一部分。想知道 TA 在不在某个具体小组，用下面的排查。`}
-      </div>`;
-    }
+  /* ① 加入的小组：2026-10-23 起不再展示（列表页会把服务器 IP 限流，且多数人设了仅登录可见） */
+  if (isSelf && groups.length) {
+    html += `<div class="list-header">我加入的小组（${esc(d.total || groups.length)}）</div>`;
     html += groups.map(g => `
       <div class="group-item" onclick="renderGroupTopics('${esc(g.id)}', '${esc(g.name)}')">
         <div class="g-icon">${esc((g.name || '?')[0])}</div>
         <div class="g-body">
           <div class="g-name">${esc(g.name)}${g.managed
-            ? ' <span style="font-size:11px;color:#c2410c">（TA 创建/管理）</span>' : ''}</div>
+            ? ' <span style="font-size:11px;color:#c2410c">（我创建/管理）</span>' : ''}</div>
           <div class="g-desc">${esc(g.desc || '')}</div>
           <div class="g-meta">
             ${g.category ? `<span class="g-tag">${esc(g.category)}</span>` : ''}
@@ -2137,30 +2125,12 @@ async function renderGroups() {
         </div>
         <div class="g-arrow">›</div>
       </div>`).join('');
-  } else if (!isSelf) {
-    html += `<div class="list-header">加入的小组${claimed ? '（TA 主页显示 ' + esc(claimed) + ' 个）' : ''}</div>`;
-    html += `<div class="chk-desc" style="padding:0 2px 4px">
-      ${needLogin
-        ? '列表只对「登录用户」开放，匿名抓不到具体是哪些组 —— 把你的豆瓣 Cookie 粘到登录里再查可能就能读到；读不到就用下面的「逐个核对」确认 TA 在不在指定小组。'
-        : (blocked
-          ? `豆瓣把这个服务器的 IP 临时限流了，不是 TA 设了隐私、也不是没有小组 —— 约 ${waitMin} 分钟后自动恢复，期间别反复刷新（越刷恢复越慢）。急着查就用下面的「逐个核对」。`
-          : (priv
-            ? '列表设成了仅自己可见，登录了也取不到 —— 用下面的「逐个核对」确认 TA 在不在指定小组。'
-            : '暂时没有拿到 TA 的小组列表 —— 用下面的「逐个核对」确认 TA 在不在指定小组。'))}
-    </div>`;
-  } else {
-    html += '<div class="empty">没有找到加入的小组</div>';
+  } else if (isSelf) {
+    html += '<div class="empty">没有找到加入的小组（登录后可见自己的完整列表）</div>';
   }
 
-  /* ② 隐藏小组排查：有列表时收成一个按钮，没列表时直接展开 */
-  if (!isSelf) {
-    if (groups.length) {
-      html += `<button class="lp-btn ghost" onclick="toggleChkPanel()">🔍 排查 TA 是否还在别的小组</button>`;
-      html += '<div id="chkSlot"></div>';
-    } else {
-      html += hiddenCheckPanelHtml();
-    }
-  }
+  /* ② 隐藏小组排查：他人一律直接展开（这是现在查小组的主要手段） */
+  if (!isSelf) html += hiddenCheckPanelHtml();
 
   /* ③ 反查 TA 的发言：始终保留 */
   if (!isSelf) html += lookupPanelHtml();
@@ -2172,15 +2142,6 @@ async function renderGroups() {
   mountNotes('notesBoxGroups', currentUser.id, currentUser.name);
   if ($('chkPanel')) renderChkChips();
   if (res.source === 'restricted') loadInterests(currentUser.id);
-}
-
-function toggleChkPanel() {
-  const slot = $('chkSlot');
-  if (!slot) return;
-  if (slot.innerHTML.trim()) { slot.innerHTML = ''; return; }
-  slot.innerHTML = hiddenCheckPanelHtml();
-  renderChkChips();
-  slot.scrollIntoView({ behavior: 'smooth', block: 'start' });
 }
 
 /* ---------- 视图3a：用户发言记录 ---------- */

@@ -720,6 +720,24 @@ async def get_user_groups(user_id: str, start: int = 0, count: int = Query(50, l
             return Resp(ok=True, source="douban",
                         data={"total": g.get("total", len(groups)), "groups": groups})
 
+    # 2026-10-23：默认不再抓取「他人加入的小组」页面。
+    # 原因：豆瓣网页端对机房 IP 限流很凶，403 之后连累其他功能，而列表本身
+    #       对「仅登录可见 / 仅自己可见」的用户也读不到。排查改用成员名单逐个核对。
+    # 想恢复旧行为：给容器加环境变量 DOUBAN_LIST_SCRAPE=1 再重启。
+    if os.getenv("DOUBAN_LIST_SCRAPE", "").strip().lower() not in ("1", "true", "yes", "on"):
+        claimed = 0
+        try:
+            claimed = (await _c().get_user(str(user_id))).get("joined_group_count", 0)
+        except DoubanError:
+            pass
+        return Resp(
+            ok=True, source="restricted",
+            data={"total": 0, "groups": [], "list_disabled": True,
+                  "claimed_total": claimed},
+            message=(f"TA 主页显示加入了 {claimed} 个小组。" if claimed else "")
+                     + "按当前设置不抓取 TA 的小组列表（豆瓣网页端容易把服务器 IP 限流）"
+                       "—— 想知道 TA 在不在某个具体小组，用下面的「隐藏小组排查」逐个核对。")
+
     # 他人 / 未登录：桌面版公开页（匿名可读，实测可用）
     www = await _www_joined(user_id)
     if www.get("status") == "ok":

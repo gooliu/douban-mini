@@ -47,7 +47,6 @@ print()
 # 新功能相关的关键元素
 checks = [
     ("hiddenCheckPanelHtml", "function hiddenCheckPanelHtml" in script),
-    ("toggleChkPanel", "function toggleChkPanel" in script),
     ("doCheckMembership", "function doCheckMembership" in script),
     ("renderChkResult", "function renderChkResult" in script),
     ("addChkFromInput", "function addChkFromInput" in script),
@@ -59,14 +58,16 @@ checks = [
     ("CSS .chk-panel", ".chk-panel {" in html),
     ("CSS .chk-badge.in", ".chk-badge.in {" in html),
     ("POST 调用 check-membership", "/api/check-membership" in script),
-    ("列表拿不到时直接展开排查面板", "html += hiddenCheckPanelHtml();" in script),
+    # 2026-10-23：他人不再展示「加入的小组」，排查面板一律直接展开
+    ("他人一律直接展开排查面板", "if (!isSelf) html += hiddenCheckPanelHtml();" in script),
     ("反查发言始终保留（非本人）", "if (!isSelf) html += lookupPanelHtml();" in script),
-    ("加入的小组自然列出", "加入的小组（${esc(d.total || groups.length)}）" in script),
-    ("列表页挂排查入口", "toggleChkPanel()" in script),
-    ("区分「仅登录可见」", "const needLogin = !!d.login_required;" in script),
-    ("banner 标题区分登录门槛", "TA 的小组只对登录用户可见" in script),
+    ("不再展示他人加入的小组列表",
+     "TA 主页显示 ' + esc(claimed)" not in script
+     and "const needLogin = !!d.login_required;" not in script),
+    ("本人仍列自己加入的小组", "我加入的小组（${esc(d.total || groups.length)}）" in script),
+    ("banner 区分列表不抓取", "TA 的小组列表不抓取，直接排查" in script),
+    ("后端默认不抓他人列表页", "DOUBAN_LIST_SCRAPE" in BACKEND),
     ("后端有 login_required 判定", "login_required" in BACKEND),
-    ("后端网页通道带访客 Cookie", 'headers["Cookie"] = ck' in BACKEND),
 ]
 bad = [n for n, ok in checks if not ok]
 for n, ok in checks:

@@ -18,8 +18,20 @@ die() { echo "!! $*"; exit 1; }
 
 echo "== 0/5 环境检查 =="
 command -v docker >/dev/null 2>&1 || die "没装 docker"
-docker ps --format '{{.Names}}' | grep -qx "$CT" || die "容器 $CT 没在运行，先 docker start $CT"
-command -v unzip >/dev/null 2>&1 || die "缺 unzip，先 apt-get install -y unzip"
+
+# docker.sock 经常只允许 root / docker 组访问。脚本自动判断要不要加 sudo：
+# 先缓存一次 sudo 凭据（只提示一次密码），后面所有 docker 命令都带上同样的前缀。
+DK=""
+if ! docker info >/dev/null 2>&1; then
+  echo "  当前用户（${USER:-$(id -un)}）不能直接访问 docker.sock，尝试 sudo"
+  command -v sudo >/dev/null 2>&1 || die "无权访问 docker 且没有 sudo。请用 root 跑，或执行 sudo usermod -aG docker \$USER 后重新登录"
+  sudo -v || die "sudo 认证失败。也可把自己加进 docker 组：sudo usermod -aG docker \$USER（需重新登录生效）"
+  DK="sudo "
+  echo "  已拿到 sudo 权限"
+fi
+
+${DK}docker ps --format '{{.Names}}' | grep -qx "$CT" || die "容器 $CT 没在运行，先 ${DK}docker start $CT"
+command -v unzip >/dev/null 2>&1 || die "缺 unzip，先 sudo apt-get install -y unzip"
 echo "  容器 $CT 运行中"
 
 echo "== 1/5 下载最新代码 =="
@@ -53,39 +65,41 @@ ls -l "$SRC/web/index.html" | awk '{print "  index.html:", $5, "字节"}'
 
 echo "== 3/5 校验版本特征 =="
 grep -q "login_required" "$SRC/backend/douban_client.py" || die "douban_client.py 不含 login_required，是旧包"
+grep -q "DOUBAN_LIST_SCRAPE" "$SRC/backend/main.py" || die "main.py 不含 DOUBAN_LIST_SCRAPE 开关，是旧包"
 grep -q "TA 的小组只对登录用户可见" "$SRC/web/index.html" || die "index.html 不含登录门槛文案，是旧包"
 echo "  两个关键特征都在，是目标版本"
 
 echo "== 4/5 备份并覆盖 =="
-docker exec "$CT" sh -c 'cp /app/backend/main.py /app/backend/main.py.bak2 2>/dev/null; cp /app/web/index.html /app/web/index.html.bak2 2>/dev/null; echo "  旧文件已备份为 *.bak2"' || true
-docker cp "$SRC/backend/main.py"          "$CT:/app/backend/main.py"          >/dev/null || die "拷 main.py 失败"
-docker cp "$SRC/backend/douban_client.py" "$CT:/app/backend/douban_client.py" >/dev/null || die "拷 douban_client.py 失败"
-docker cp "$SRC/web/index.html"           "$CT:/app/web/index.html"           >/dev/null || die "拷 index.html 失败"
+${DK}docker exec "$CT" sh -c 'cp /app/backend/main.py /app/backend/main.py.bak2 2>/dev/null; cp /app/web/index.html /app/web/index.html.bak2 2>/dev/null; echo "  旧文件已备份为 *.bak2"' || true
+${DK}docker cp "$SRC/backend/main.py"          "$CT:/app/backend/main.py"          >/dev/null || die "拷 main.py 失败"
+${DK}docker cp "$SRC/backend/douban_client.py" "$CT:/app/backend/douban_client.py" >/dev/null || die "拷 douban_client.py 失败"
+${DK}docker cp "$SRC/web/index.html"           "$CT:/app/web/index.html"           >/dev/null || die "拷 index.html 失败"
 echo "  三个文件已覆盖"
 
 echo "== 5/5 重启并自检 =="
-docker restart "$CT" >/dev/null || die "重启失败"
+${DK}docker restart "$CT" >/dev/null || die "重启失败"
 for i in 1 2 3 4 5 6 7 8 9 10; do
   sleep 2
   curl -s -o /dev/null -m 3 http://127.0.0.1/ && break
 done
-docker ps --filter "name=$CT" --format '  状态: {{.Status}}'
+${DK}docker ps --filter "name=$CT" --format '  状态: {{.Status}}'
 
 echo "  --- 容器内版本特征 ---"
-docker exec "$CT" sh -c 'echo "  login_required 命中: $(grep -c login_required /app/backend/douban_client.py)"; echo "  登录门槛文案命中: $(grep -c "只对登录用户可见" /app/web/index.html)"' || true
+${DK}docker exec "$CT" sh -c 'echo "  DOUBAN_LIST_SCRAPE 开关: $(grep -c DOUBAN_LIST_SCRAPE /app/backend/main.py)"; echo "  登录门槛文案命中: $(grep -c "只对登录用户可见" /app/web/index.html)"' || true
 
-echo "  --- 接口实测 ---"
+echo "  --- 接口实测（新版预期） ---"
 for uid in 63425139 207700707 1097726; do
-  code=$(curl -s -o "$WORK/r.json" -w '%{http_code}' -m 25 "http://127.0.0.1/api/user/$uid/joined-groups")
-  st=$(grep -o '"status": *"[a-z_]*"' "$WORK/r.json" 2>/dev/null | head -1 | sed 's/.*: *"//; s/"//')
-  echo "  uid $uid -> HTTP $code, status=${st:-无}"
+  code=$(curl -s -o "$WORK/r.json" -w '%{http_code}' -m 25 "http://127.0.0.1/api/user/$uid/groups")
+  dis=$(grep -o '"list_disabled": *[a-z]*' "$WORK/r.json" 2>/dev/null | head -1 | grep -o '[a-z]*$')
+  clm=$(grep -o '"claimed_total": *[0-9]*' "$WORK/r.json" 2>/dev/null | head -1 | grep -o '[0-9]*$')
+  tot=$(grep -o '"total": *[0-9]*' "$WORK/r.json" 2>/dev/null | head -1 | grep -o '[0-9]*$')
+  echo "  uid $uid -> HTTP $code, list_disabled=${dis:-无} claimed=${clm:-0} total=${tot:-0}"
 done
 
 echo
 echo "判定：三个接口都应是 HTTP 200。"
-echo "  ok             = 正常列出（63425139 应为这个）"
-echo "  login_required = 对方设了「仅登录用户可见」（207700707 / 1097726 应为这个）"
-echo "  blocked        = 服务器 IP 被豆瓣临时限流，不是用户隐私；等 20~30 分钟再刷。"
-echo "                   代码已加冷却（600s 起、连续命中翻倍封顶 1 小时），期间不会反复打豆瓣。"
+echo "  他人（207700707 / 1097726）：list_disabled=true、total=0、claimed>0  → 正确，不再抓取列表"
+echo "  查自己（63425139 未登录时同样是他人视角）：同上；登录后应 total>0"
+echo "  若 list_disabled 显示「无」，说明还是旧包，把上面输出发我。"
 echo "然后浏览器 Ctrl+F5 强刷 http://43.108.119.94/ 即可看到新版。"
-echo "回滚：docker exec $CT sh -c 'cp /app/backend/main.py.bak2 /app/backend/main.py; cp /app/web/index.html /app/web/index.html.bak2' && docker restart $CT"
+echo "回滚：${DK}docker exec $CT sh -c 'cp /app/backend/main.py.bak2 /app/backend/main.py; cp /app/web/index.html.bak2 /app/web/index.html' && ${DK}docker restart $CT"

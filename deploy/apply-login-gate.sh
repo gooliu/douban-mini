@@ -1,14 +1,15 @@
 #!/usr/bin/env bash
 # 一键把「登录门槛判定」这版更新应用到已运行的容器
-# 用法（服务器上，root）：
-#   cd /root && curl -fsSL https://raw.githubusercontent.com/gooliu/douban-mini/main/deploy/apply-login-gate.sh -o apply.sh && bash apply.sh
+# 用法（服务器上，root 或普通用户都行；docker 命令需要权限时前面加 sudo）：
+#   cd ~ && curl -fsSL https://raw.githubusercontent.com/gooliu/douban-mini/main/deploy/apply-login-gate.sh -o apply.sh && bash apply.sh
 #
 # 做四件事：下载最新代码 -> 校验 -> 备份并覆盖容器内文件 -> 重启并自检
 # 幂等：重复跑只覆盖同样三个文件，不会动 app-data 数据卷
 set -u
 
 CT=douban-mini
-WORK=/root/dbm-apply
+# 别写死 /root —— 阿里云 Workbench 的 shell 有时不是 root，会 Permission denied
+WORK="${HOME:-/tmp}/dbm-apply"
 URL_ZIP="https://codeload.github.com/gooliu/douban-mini/zip/refs/heads/main"
 URL_PKG="https://raw.githubusercontent.com/gooliu/douban-mini/main/deploy/douban-mini-update-login-gate.zip"
 MD5_EXPECT="ee8ca21db5adabd4cf50d737097d4682"
